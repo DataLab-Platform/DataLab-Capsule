@@ -1,0 +1,216 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:datalab:schema:provenance-ledger:1",
+  "title": "DataLab workspace provenance ledger, version 1",
+  "description": "Facts about the executions that produced a workspace. Arrays are never copied into the ledger. Unknown properties are tolerated so that additive changes stay compatible.",
+  "type": "object",
+  "required": ["schema", "schema_version", "workspace_id", "environments", "states", "activities"],
+  "properties": {
+    "schema": {"const": "datalab-provenance-ledger"},
+    "schema_version": {"const": 1},
+    "workspace_id": {"$ref": "#/$defs/uuid"},
+    "environments": {
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/digest"},
+      "additionalProperties": {"$ref": "#/$defs/environment"}
+    },
+    "states": {
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/uuid"},
+      "additionalProperties": {"$ref": "#/$defs/state"}
+    },
+    "activities": {"type": "array", "items": {"$ref": "#/$defs/activity"}}
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "identifier": {"type": "string", "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"},
+    "kind": {"enum": ["signal", "image"]},
+    "limits": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "timestamp": {"type": "string", "minLength": 1},
+    "environment": {
+      "type": "object",
+      "required": ["edition", "edition_version", "edition_revision", "python", "platform", "machine", "pyodide", "packages"],
+      "properties": {
+        "edition": {"enum": ["desktop", "web"]},
+        "edition_version": {"type": "string"},
+        "edition_revision": {"type": ["string", "null"]},
+        "python": {
+          "type": "object",
+          "required": ["implementation", "version"],
+          "properties": {
+            "implementation": {"type": "string"},
+            "version": {"type": "string"}
+          }
+        },
+        "platform": {"type": "string"},
+        "machine": {"type": "string"},
+        "pyodide": {"type": ["string", "null"]},
+        "packages": {
+          "type": "object",
+          "additionalProperties": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "fingerprint": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "required": ["scheme", "value"],
+          "properties": {
+            "scheme": {"type": "string", "minLength": 1},
+            "value": {"$ref": "#/$defs/digest"}
+          }
+        }
+      ]
+    },
+    "state": {
+      "type": "object",
+      "required": ["state_id", "object_uuid", "kind", "fingerprint", "dtype", "rows", "units", "limits", "produced_by"],
+      "properties": {
+        "state_id": {"$ref": "#/$defs/uuid"},
+        "object_uuid": {"$ref": "#/$defs/uuid"},
+        "kind": {"$ref": "#/$defs/kind"},
+        "fingerprint": {"$ref": "#/$defs/fingerprint"},
+        "dtype": {"type": "string", "minLength": 1},
+        "length": {"type": "integer", "minimum": 0},
+        "rows": {"type": "array", "items": {"type": "string"}},
+        "units": {"type": "object", "additionalProperties": {"type": "string"}},
+        "limits": {"$ref": "#/$defs/limits"},
+        "produced_by": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/uuid"}]},
+        "sequence": {"description": "Observation order; the latest state of an object has the highest sequence.", "type": "integer", "minimum": 0}
+      },
+      "if": {"properties": {"kind": {"const": "signal"}}},
+      "then": {"required": ["length"]}
+    },
+    "operation": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "required": ["id", "contract_version"],
+          "additionalProperties": false,
+          "properties": {
+            "id": {"$ref": "#/$defs/identifier"},
+            "contract_version": {"type": "integer", "minimum": 1}
+          }
+        }
+      ]
+    },
+    "binding": {
+      "description": "state_id binds a concrete state (activities). object_uuids (object selection) and step (output of an upstream step) are reserved and refused by readers of this version.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["state_id"],
+          "additionalProperties": false,
+          "properties": {"state_id": {"$ref": "#/$defs/uuid"}}
+        },
+        {
+          "type": "object",
+          "required": ["object_uuids"],
+          "additionalProperties": false,
+          "properties": {
+            "object_uuids": {"type": "array", "items": {"$ref": "#/$defs/uuid"}, "minItems": 1}
+          }
+        },
+        {
+          "type": "object",
+          "required": ["step", "role"],
+          "additionalProperties": false,
+          "properties": {"step": {"type": "string"}, "role": {"type": "string"}}
+        }
+      ]
+    },
+    "call": {
+      "type": "object",
+      "required": ["operation", "parameters", "inputs"],
+      "additionalProperties": false,
+      "properties": {
+        "operation": {"$ref": "#/$defs/operation"},
+        "parameters": {"type": ["object", "null"]},
+        "inputs": {
+          "description": "Ordered: a role of cardinality n appears once per input, in call order.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["role", "binding"],
+            "additionalProperties": false,
+            "properties": {
+              "role": {"type": "string", "minLength": 1},
+              "binding": {"$ref": "#/$defs/binding"}
+            }
+          }
+        }
+      }
+    },
+    "implementation": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "required": ["package", "version", "python_name"],
+          "properties": {
+            "package": {"type": ["string", "null"]},
+            "version": {"type": ["string", "null"]},
+            "python_name": {"type": "string", "minLength": 1}
+          }
+        }
+      ]
+    },
+    "output": {
+      "description": "Ordered. A state output or, for an analysis, an artifact naming the object and metadata key that hold the result.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["role", "state_id"],
+          "additionalProperties": false,
+          "properties": {
+            "role": {"type": "string", "minLength": 1},
+            "state_id": {"$ref": "#/$defs/uuid"}
+          }
+        },
+        {
+          "type": "object",
+          "required": ["role", "artifact"],
+          "additionalProperties": false,
+          "properties": {
+            "role": {"type": "string", "minLength": 1},
+            "artifact": {
+              "type": "object",
+              "required": ["kind", "object_uuid", "key"],
+              "properties": {
+                "kind": {"type": "string", "minLength": 1},
+                "object_uuid": {"$ref": "#/$defs/uuid"},
+                "key": {"type": "string", "minLength": 1}
+              }
+            }
+          }
+        }
+      ]
+    },
+    "activity": {
+      "type": "object",
+      "required": ["activity_id", "command_id", "call", "implementation", "outputs", "context", "limits", "environment_id", "edition", "origin", "status", "started_at", "finished_at"],
+      "properties": {
+        "activity_id": {"$ref": "#/$defs/uuid"},
+        "command_id": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/uuid"}]},
+        "call": {"$ref": "#/$defs/call"},
+        "implementation": {"$ref": "#/$defs/implementation"},
+        "outputs": {"type": "array", "items": {"$ref": "#/$defs/output"}},
+        "context": {"type": "object"},
+        "limits": {"$ref": "#/$defs/limits"},
+        "environment_id": {"$ref": "#/$defs/digest"},
+        "edition": {"enum": ["desktop", "web"]},
+        "origin": {"enum": ["ordinary", "recompute_in_place", "history_replay", "recipe", "legacy_metadata", "opaque"]},
+        "status": {"const": "completed"},
+        "started_at": {"$ref": "#/$defs/timestamp"},
+        "finished_at": {"$ref": "#/$defs/timestamp"}
+      }
+    }
+  }
+}

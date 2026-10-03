@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:datalab:schema:verification-report:1",
+  "title": "DataLab verification report, version 1",
+  "description": "Result of preparing, replaying and comparing one recorded activity. The verification run lives only in the report, never in the ledger.",
+  "type": "object",
+  "required": ["report", "report_version", "activity_id", "restoration", "eligibility", "inputs", "reference", "environment", "verdict", "rule", "observed", "verification_activity"],
+  "properties": {
+    "report": {"const": "datalab-verification-report"},
+    "report_version": {"const": 1},
+    "activity_id": {"type": "string", "minLength": 1},
+    "restoration": {"enum": ["included", "replayable", "opaque", "unavailable"]},
+    "eligibility": {"enum": ["ready", "missing_input", "input_changed", "unsupported_operation", "unsupported_contract", "unsupported_context", "invalid_parameters"]},
+    "reason": {"type": ["string", "null"]},
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["role", "state_id", "status"],
+        "properties": {
+          "role": {"type": "string"},
+          "state_id": {"type": "string"},
+          "status": {"enum": ["available", "missing", "altered", "changed", "unsupported"]}
+        }
+      }
+    },
+    "reference": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "required": ["state_id", "status"],
+          "properties": {
+            "state_id": {"type": "string"},
+            "status": {"enum": ["available", "missing", "altered"]}
+          }
+        }
+      ]
+    },
+    "environment": {
+      "type": "object",
+      "required": ["recorded", "current", "match", "differences"],
+      "properties": {
+        "recorded": {"type": ["string", "null"]},
+        "current": {"type": ["string", "null"]},
+        "match": {"enum": ["same", "different", "unknown"]},
+        "differences": {
+          "type": "object",
+          "additionalProperties": {"type": "array", "minItems": 2, "maxItems": 2}
+        }
+      }
+    },
+    "verdict": {"enum": ["exact", "within_tolerance", "different", "not_verified"]},
+    "rule": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "required": ["kind"],
+          "properties": {
+            "kind": {"enum": ["exact", "tolerance"]},
+            "rtol": {"type": "number", "minimum": 0},
+            "atol": {"type": "number", "minimum": 0}
+          },
+          "if": {"properties": {"kind": {"const": "tolerance"}}},
+          "then": {"required": ["rtol", "atol"]}
+        }
+      ]
+    },
+    "observed": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "required": ["mismatches", "max_abs_error", "max_rel_error"],
+          "properties": {
+            "mismatches": {"type": "integer", "minimum": 0},
+            "max_abs_error": {"type": ["number", "null"]},
+            "max_rel_error": {"type": ["number", "null"]},
+            "dtype_match": {"type": "boolean"},
+            "shape_match": {"type": "boolean"}
+          }
+        }
+      ]
+    },
+    "verification_activity": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "required": ["origin", "outputs"],
+          "properties": {
+            "origin": {"const": "verification"},
+            "outputs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["role", "state_id", "locator"],
+                "properties": {
+                  "role": {"type": "string"},
+                  "state_id": {"type": "string"},
+                  "locator": {"type": "null"}
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

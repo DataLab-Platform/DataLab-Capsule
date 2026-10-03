@@ -1,0 +1,55 @@
+{
+  "report": {
+    "report": "datalab-verification-report",
+    "report_version": 1,
+    "activity_id": "00000000-0000-4000-8000-000000000201",
+    "restoration": "replayable",
+    "eligibility": "ready",
+    "reason": null,
+    "inputs": [
+      {
+        "role": "source",
+        "state_id": "00000000-0000-4000-8000-000000000001",
+        "status": "available"
+      }
+    ],
+    "reference": {
+      "state_id": "00000000-0000-4000-8000-000000000002",
+      "status": "available"
+    },
+    "environment": {
+      "recorded": "sha256:15423012e9ba29e9460b377d6a947f18c4e2588894925133cc7a33f6f1496fb2",
+      "current": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "match": "different",
+      "differences": {
+        "numpy": [
+          "2.3.0",
+          "1.26.4"
+        ]
+      }
+    },
+    "verdict": "within_tolerance",
+    "rule": {
+      "kind": "tolerance",
+      "rtol": 1e-12,
+      "atol": 0.0
+    },
+    "observed": {
+      "mismatches": 2,
+      "max_abs_error": 2.220446049250313e-16,
+      "max_rel_error": 4.440892098500626e-16,
+      "dtype_match": true,
+      "shape_match": true
+    },
+    "verification_activity": {
+      "origin": "verification",
+      "outputs": [
+        {
+          "role": "result",
+          "state_id": "00000000-0000-4000-8000-000000000900",
+          "locator": null
+        }
+      ]
+    }
+  }
+}

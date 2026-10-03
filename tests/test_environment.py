@@ -34,11 +34,13 @@ def test_environment_record() -> None:
     assert environment_id(other) != environment_id(record)
 
 
-def test_environment_has_no_host_or_user() -> None:
+def test_environment_has_no_host_or_user(monkeypatch) -> None:
     """Host and user names never appear in the record."""
+    monkeypatch.setattr(platform, "node", lambda: "secret-host-name")
+    monkeypatch.setattr(getpass, "getuser", lambda: "secret-user-name")
     text = json.dumps(collect_environment("desktop", "1.3.0"))
-    assert platform.node() not in text
-    assert getpass.getuser() not in text
+    assert "secret-host-name" not in text
+    assert "secret-user-name" not in text
 
 
 def test_unknown_edition() -> None:

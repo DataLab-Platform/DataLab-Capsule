@@ -1,0 +1,159 @@
+{
+  "ledger": {
+    "schema": "datalab-provenance-ledger",
+    "schema_version": 1,
+    "workspace_id": "00000000-0000-4000-8000-000000000999",
+    "environments": {
+      "sha256:15423012e9ba29e9460b377d6a947f18c4e2588894925133cc7a33f6f1496fb2": {
+        "edition": "desktop",
+        "edition_version": "1.4.0",
+        "edition_revision": null,
+        "python": {
+          "implementation": "CPython",
+          "version": "3.12.10"
+        },
+        "platform": "win32",
+        "machine": "AMD64",
+        "pyodide": null,
+        "packages": {
+          "sigima": "1.3.0",
+          "guidata": "3.16.0",
+          "numpy": "2.3.0",
+          "scipy": "1.16.0",
+          "h5py": "3.14.0"
+        }
+      }
+    },
+    "states": {
+      "00000000-0000-4000-8000-000000000001": {
+        "state_id": "00000000-0000-4000-8000-000000000001",
+        "object_uuid": "00000000-0000-4000-8000-000000000101",
+        "kind": "signal",
+        "fingerprint": {
+          "scheme": "datalab-signal-v1",
+          "value": "sha256:0000000000000000000000000000000000000000000000000000000000000001"
+        },
+        "dtype": "float64",
+        "length": 4,
+        "rows": [
+          "x",
+          "y"
+        ],
+        "units": {
+          "x": "s",
+          "y": ""
+        },
+        "limits": [],
+        "produced_by": null,
+        "sequence": 0
+      },
+      "00000000-0000-4000-8000-000000000002": {
+        "state_id": "00000000-0000-4000-8000-000000000002",
+        "object_uuid": "00000000-0000-4000-8000-000000000102",
+        "kind": "signal",
+        "fingerprint": {
+          "scheme": "datalab-signal-v1",
+          "value": "sha256:0000000000000000000000000000000000000000000000000000000000000002"
+        },
+        "dtype": "float64",
+        "length": 4,
+        "rows": [
+          "x",
+          "y"
+        ],
+        "units": {
+          "x": "s",
+          "y": ""
+        },
+        "limits": [],
+        "produced_by": "00000000-0000-4000-8000-000000000201",
+        "sequence": 1
+      },
+      "00000000-0000-4000-8000-000000000003": {
+        "state_id": "00000000-0000-4000-8000-000000000003",
+        "object_uuid": "00000000-0000-4000-8000-000000000103",
+        "kind": "signal",
+        "fingerprint": {
+          "scheme": "datalab-signal-v1",
+          "value": "sha256:0000000000000000000000000000000000000000000000000000000000000003"
+        },
+        "dtype": "float64",
+        "length": 4,
+        "rows": [
+          "x",
+          "y"
+        ],
+        "units": {
+          "x": "s",
+          "y": ""
+        },
+        "limits": [],
+        "produced_by": "00000000-0000-4000-8000-000000000201",
+        "sequence": 2
+      }
+    },
+    "activities": [
+      {
+        "activity_id": "00000000-0000-4000-8000-000000000201",
+        "command_id": "00000000-0000-4000-8000-000000000701",
+        "call": {
+          "operation": {
+            "id": "sigima.signal.extract_rois",
+            "contract_version": 1
+          },
+          "parameters": {
+            "roi_indices": [
+              1,
+              0
+            ]
+          },
+          "inputs": [
+            {
+              "role": "source",
+              "binding": {
+                "state_id": "00000000-0000-4000-8000-000000000001"
+              }
+            }
+          ]
+        },
+        "implementation": null,
+        "outputs": [
+          {
+            "role": "results",
+            "state_id": "00000000-0000-4000-8000-000000000003"
+          },
+          {
+            "role": "results",
+            "state_id": "00000000-0000-4000-8000-000000000002"
+          }
+        ],
+        "context": {
+          "roi": null,
+          "mask": null,
+          "x_alignment": null
+        },
+        "limits": [],
+        "environment_id": "sha256:15423012e9ba29e9460b377d6a947f18c4e2588894925133cc7a33f6f1496fb2",
+        "edition": "desktop",
+        "origin": "ordinary",
+        "status": "completed",
+        "started_at": "2026-10-03T08:00:00.000Z",
+        "finished_at": "2026-10-03T08:00:00.010Z"
+      }
+    ]
+  },
+  "locators": {
+    "00000000-0000-4000-8000-000000000001": {
+      "kind": "signal",
+      "path": "/DataLab_Sig/g001: Group/s001: obj"
+    },
+    "00000000-0000-4000-8000-000000000002": {
+      "kind": "signal",
+      "path": "/DataLab_Sig/g001: Group/s002: obj"
+    },
+    "00000000-0000-4000-8000-000000000003": {
+      "kind": "signal",
+      "path": "/DataLab_Sig/g001: Group/s003: obj"
+    }
+  }
+}
