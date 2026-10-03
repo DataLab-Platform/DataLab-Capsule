@@ -1,0 +1,56 @@
+{
+  "description": "Golden vectors shared by the CPython test suite and the Pyodide runner. Number and JCS vectors come from RFC 8785 (sections 3.2.2.3 and 3.2.3, appendix B); fingerprints use a four-point signal and its maximum and amplitude normalizations.",
+  "numbers": [
+    {"bits": "0000000000000000", "expected": "0"},
+    {"bits": "8000000000000000", "expected": "0"},
+    {"bits": "0000000000000001", "expected": "5e-324"},
+    {"bits": "8000000000000001", "expected": "-5e-324"},
+    {"bits": "7fefffffffffffff", "expected": "1.7976931348623157e+308"},
+    {"bits": "ffefffffffffffff", "expected": "-1.7976931348623157e+308"},
+    {"bits": "4340000000000000", "expected": "9007199254740992"},
+    {"bits": "c340000000000000", "expected": "-9007199254740992"},
+    {"bits": "4430000000000000", "expected": "295147905179352830000"},
+    {"bits": "44b52d02c7e14af5", "expected": "9.999999999999997e+22"},
+    {"bits": "44b52d02c7e14af6", "expected": "1e+23"},
+    {"bits": "44b52d02c7e14af7", "expected": "1.0000000000000001e+23"},
+    {"bits": "444b1ae4d6e2ef4e", "expected": "999999999999999700000"},
+    {"bits": "444b1ae4d6e2ef4f", "expected": "999999999999999900000"},
+    {"bits": "444b1ae4d6e2ef50", "expected": "1e+21"},
+    {"bits": "3eb0c6f7a0b5ed8c", "expected": "9.999999999999997e-7"},
+    {"bits": "3eb0c6f7a0b5ed8d", "expected": "0.000001"},
+    {"bits": "41b3de4355555553", "expected": "333333333.3333332"},
+    {"bits": "41b3de4355555554", "expected": "333333333.33333325"},
+    {"bits": "41b3de4355555555", "expected": "333333333.3333333"},
+    {"bits": "41b3de4355555556", "expected": "333333333.3333334"},
+    {"bits": "41b3de4355555557", "expected": "333333333.33333343"},
+    {"bits": "becbf647612f3696", "expected": "-0.0000033333333333333333"},
+    {"bits": "43143ff3c1cb0959", "expected": "1424953923781206.2"}
+  ],
+  "jcs_files": [
+    {"input": "jcs/rfc8785-sample.json", "expected": "jcs/rfc8785-sample.out"}
+  ],
+  "key_order": {
+    "input": {
+      "\u20ac": "Euro Sign",
+      "\r": "Carriage Return",
+      "\ufb33": "Hebrew Letter Dalet With Dagesh",
+      "1": "One",
+      "\ud83d\ude00": "Emoji: Grinning Face",
+      "\u0080": "Control",
+      "\u00f6": "Latin Small Letter O With Diaeresis"
+    },
+    "expected": ["\r", "1", "\u0080", "\u00f6", "\u20ac", "\ud83d\ude00", "\ufb33"]
+  },
+  "fingerprints": [
+    {"name": "signal", "x": [0.0, 0.25, 0.5, 0.75], "y": [-2.0, 0.0, 1.0, 4.0], "units": {"x": "s", "y": ""}, "expected": "sha256:a6fd76dfcb9412db706ad7dbfd3fc68dd4ed57ae0de5032ead395b1ccde4e2ac"},
+    {"name": "maximum normalization", "x": [0.0, 0.25, 0.5, 0.75], "y": [-0.5, 0.0, 0.25, 1.0], "units": {"x": "s", "y": ""}, "expected": "sha256:3be7f81fb37dbe6a6afd757d0bf4739b7c83b1503113fde64048d3edd1976ed6"},
+    {"name": "amplitude normalization", "x": [0.0, 0.25, 0.5, 0.75], "y_hex": ["0000000000000000", "3fd5555555555555", "3fe0000000000000", "3ff0000000000000"], "units": {"x": "s", "y": ""}, "expected": "sha256:5c3be8fc62dfa915bc9a0da1e263b737026ec07fbff829ce2b69fd1d808ecb40"}
+  ],
+  "digests": [
+    {
+      "name": "manifest sample",
+      "document": {"@context": "https://w3id.org/ro/crate/1.3/context", "@graph": [{"@id": "./", "@type": "Dataset", "name": "sample \u20ac", "size": 1.0, "parts": [1e30, 4.5, 0.002]}]},
+      "expected": "sha256:eefe60978fbd00ffdb7b6fb6dd5e0386ecdbd2273b3f8dcde2df8daf36ba5b5a"
+    }
+  ]
+}

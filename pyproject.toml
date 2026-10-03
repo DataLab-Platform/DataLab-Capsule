@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "DataLab-Capsule"
+dynamic = ["version"]
+description = "Exchange and verify scientific workspace provenance as open RO-Crate capsules (library and CLI, no DataLab required)"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "DataLab Platform Developers" }]
+requires-python = ">=3.9, <4"
+dependencies = ["jsonschema >= 4.17"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering",
+]
+
+[project.urls]
+Homepage = "https://github.com/DataLab-Platform/DataLab-Capsule"
+
+[project.optional-dependencies]
+hdf5 = ["NumPy >= 1.22", "h5py >= 3.6"]
+test = ["pytest >= 7", "NumPy >= 1.22", "h5py >= 3.6"]
+dev = ["ruff"]
+
+[tool.setuptools.dynamic]
+version = { attr = "datalab_capsule.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+datalab_capsule = ["schemas/*.json", "contexts/*.jsonld"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib"
+
+[tool.ruff]
+exclude = [".git", ".vscode", "build", "dist", "venv*", ".venv*", "node_modules"]
+line-length = 88
+indent-width = 4
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["D202", "D403", "E", "F", "I", "NPY201", "RUF022", "W"]
+ignore = ["E203"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"

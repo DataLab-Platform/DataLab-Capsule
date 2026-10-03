@@ -1,0 +1,9 @@
+{
+  "name": "datalab-capsule-pyodide-tests",
+  "private": true,
+  "description": "Runs DataLab-Capsule golden vectors in Pyodide hosted by Node.",
+  "type": "module",
+  "dependencies": {
+    "pyodide": "0.26.4"
+  }
+}

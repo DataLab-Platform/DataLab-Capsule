@@ -1,0 +1,55 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, develop, "feature/**", "fix/**"]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+jobs:
+  cpython:
+    name: CPython ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test,dev]"
+      - name: Check that no application package is installed
+        run: python -c "import importlib.util as u, sys; found=[n for n in ('datalab','sigima','sigimax','guidata','qtpy') if u.find_spec(n)]; sys.exit(f'Unexpected packages: {found}' if found else 0)"
+      - name: Lint with Ruff
+        run: |
+          ruff format --check .
+          ruff check --output-format=github .
+      - name: Test with pytest
+        run: pytest -v
+
+  pyodide:
+    name: Pyodide 0.26.4 (Node)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build wheel
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip wheel . --no-deps -w dist
+      - name: Run golden vectors in Pyodide
+        working-directory: tests/pyodide
+        run: |
+          npm install --no-audit --no-fund
+          node run_golden.mjs "$(ls ../../dist/*.whl)"
