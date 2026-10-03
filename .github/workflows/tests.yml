@@ -53,3 +53,33 @@ jobs:
         run: |
           npm install --no-audit --no-fund
           node run_pyodide.mjs "$(ls ../../dist/*.whl)"
+
+  clean-env:
+    name: Capsule CLI in a clean environment
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build a wheel and capsules from the reference workspaces
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip wheel . --no-deps -w dist
+          python -m venv /tmp/build-env
+          /tmp/build-env/bin/pip install -q "$(ls dist/*.whl)[hdf5]"
+          for edition in desktop web; do
+            /tmp/build-env/bin/python examples/workspace_to_capsule.py \
+              "tests/fixtures/workspaces/${edition}_chain.h5" "/tmp/${edition}.dlcapsule"
+          done
+      - name: Validate and inspect without NumPy, h5py or any application
+        run: |
+          python -m venv /tmp/clean-env
+          /tmp/clean-env/bin/pip install -q "$(ls dist/*.whl)"
+          /tmp/clean-env/bin/python -c "import importlib.util as u, sys; found=[n for n in ('numpy','h5py','datalab','sigima','qtpy') if u.find_spec(n)]; sys.exit(f'Unexpected packages: {found}' if found else 0)"
+          cd /tmp
+          for edition in desktop web; do
+            /tmp/clean-env/bin/workspace-capsule validate "${edition}.dlcapsule"
+            /tmp/clean-env/bin/workspace-capsule inspect "${edition}.dlcapsule"
+            /tmp/clean-env/bin/workspace-capsule inspect "${edition}.dlcapsule" --json > /dev/null
+          done

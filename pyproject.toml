@@ -24,6 +24,9 @@ classifiers = [
 [project.urls]
 Homepage = "https://github.com/DataLab-Platform/DataLab-Capsule"
 
+[project.scripts]
+workspace-capsule = "datalab_capsule.cli:main"
+
 [project.optional-dependencies]
 hdf5 = ["NumPy >= 1.22", "h5py >= 3.6"]
 test = ["pytest >= 7", "NumPy >= 1.22", "h5py >= 3.6"]
