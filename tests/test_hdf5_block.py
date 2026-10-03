@@ -17,9 +17,12 @@ from datalab_capsule.hdf5 import (
     BLOCK_GROUP,
     ProvenanceFormatError,
     build_locators,
+    load_ledger,
+    locate_current_states,
     locate_fingerprints,
     read_block,
     read_signal,
+    save_ledger,
     scan_object_index,
     write_block,
 )
@@ -105,6 +108,29 @@ def test_block_locators_and_fingerprints() -> None:
         altered = locate_fingerprints(h5file, read_locators)
         assert altered[state_id] != fingerprints[state_id]
         assert read_signal(h5file, read_locators[state_id]["path"])["xunit"] == "s"
+
+
+def test_save_and_load_ledger() -> None:
+    """Only current, unchanged states are located; load derives state statuses."""
+    first, second, changed = (
+        f"00000000-0000-4000-8000-00000000000{i}" for i in (2, 3, 4)
+    )
+    ledger = Ledger()
+    old = ledger.observe(first, signal_state_facts(signal([1.0, 2.0, 3.0, 4.0])))
+    current = ledger.observe(first, signal_state_facts(signal([1.0, 2.0, 3.0, 5.0])))
+    kept = ledger.observe(second, signal_state_facts(signal([0.0, 1.0, 0.0, 1.0])))
+    stale = ledger.observe(changed, signal_state_facts(signal([7.0, 7.0, 7.0, 7.0])))
+    with _memory_file() as h5file:
+        _write_signal(h5file, "/DataLab_Sig/g: G/a: A", signal([1, 2, 3, 5]), first)
+        _write_signal(h5file, "/DataLab_Sig/g: G/b: B", signal([0, 1, 0, 1]), second)
+        _write_signal(h5file, "/DataLab_Sig/g: G/c: C", signal([7, 7, 7, 8]), changed)
+        assert set(locate_current_states(h5file, ledger)) == {current, kept}
+        save_ledger(h5file, ledger)
+        restored, status = load_ledger(h5file)
+        assert restored.to_dict() == ledger.to_dict()
+        assert status == {old: "unavailable", stale: "unavailable"}
+        h5file["/DataLab_Sig/g: G/b: B/xydata"][1, 0] = 0.5
+        assert load_ledger(h5file)[1][kept] == "altered"
 
 
 def test_absent_block() -> None:

@@ -32,9 +32,12 @@ __all__ = [
     "ProvenanceFormatError",
     "build_locators",
     "has_block",
+    "load_ledger",
+    "locate_current_states",
     "locate_fingerprints",
     "read_block",
     "read_signal",
+    "save_ledger",
     "scan_object_index",
     "write_block",
 ]
@@ -287,3 +290,64 @@ def locate_fingerprints(
             signal["yunit"],
         )
     return result
+
+
+def locate_current_states(h5file: Any, ledger: Ledger) -> dict[str, dict[str, str]]:
+    """Locate the latest state of each ledger object whose saved data match it.
+
+    Objects changed since their latest recorded state, objects of another kind
+    and states without fingerprint get no locator.
+
+    Returns:
+        ``state_id -> {"kind", "path"}``.
+    """
+    index = scan_object_index(h5file)
+    candidates: dict[str, dict[str, str]] = {}
+    for object_uuid in ledger.object_uuids():
+        state = ledger.latest_state(object_uuid)
+        location = index.get(object_uuid)
+        if (
+            location is not None
+            and state["fingerprint"] is not None
+            and location["kind"] == state["kind"] == "signal"
+        ):
+            candidates[state["state_id"]] = location
+    fingerprints = locate_fingerprints(h5file, candidates)
+    return {
+        state_id: location
+        for state_id, location in candidates.items()
+        if fingerprints[state_id] == ledger.states[state_id]["fingerprint"]["value"]
+    }
+
+
+def save_ledger(h5file: Any, ledger: Ledger) -> None:
+    """Write the provenance block of a workspace file, after its panels."""
+    write_block(h5file, ledger, locate_current_states(h5file, ledger))
+
+
+def load_ledger(h5file: Any) -> tuple[Ledger, dict[str, str]] | None:
+    """Read the provenance block and derive the status of each state.
+
+    A located state whose data no longer match its fingerprint is ``altered``;
+    a state without locator is ``unavailable``.
+
+    Returns:
+        ``(ledger, state_status)``, or None when the file has no block.
+
+    Raises:
+        ProvenanceFormatError: If the block or a located object is invalid.
+    """
+    block = read_block(h5file)
+    if block is None:
+        return None
+    ledger, locators = block
+    fingerprints = locate_fingerprints(h5file, locators)
+    status: dict[str, str] = {}
+    for state_id, state in ledger.states.items():
+        if state_id not in locators:
+            status[state_id] = "unavailable"
+        elif state["fingerprint"] is None or (
+            fingerprints[state_id] != state["fingerprint"]["value"]
+        ):
+            status[state_id] = "altered"
+    return ledger, status
