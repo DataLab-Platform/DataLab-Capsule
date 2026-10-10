@@ -20,8 +20,8 @@ The manifest fingerprint is the SHA-256 of the RFC 8785 canonical JSON of the
 manifest without its ``dlc:manifestFingerprint`` property. It is never written
 into the HDF5 file.
 
-Terms of the DataLab profile use the ``dlc:`` prefix. :data:`PROFILE_IRI` and
-:data:`TERMS_IRI` are placeholders until permanent identifiers are reserved.
+Terms of the DataLab profile use the ``dlc:`` prefix. The profile and its terms
+are described at https://datalab-platform.com/capsule/.
 """
 
 from __future__ import annotations
@@ -56,10 +56,10 @@ WORKSPACE_NAME = "workspace.h5"
 RO_CRATE = "https://w3id.org/ro/crate/1.3"
 RO_CRATE_CONTEXT = "https://w3id.org/ro/crate/1.3/context"
 PROCESS_RUN_CRATE = "https://w3id.org/ro/wfrun/process/0.6"
-#: Placeholder IRI of the DataLab capsule profile (experimental, version 0.1).
-PROFILE_IRI = "urn:datalab:capsule:profile:0.1"
-#: Placeholder namespace of the DataLab capsule terms (prefix ``dlc:``).
-TERMS_IRI = "urn:datalab:capsule:terms#"
+#: Identifier of the DataLab capsule profile (experimental, version 0.1).
+PROFILE_IRI = "https://datalab-platform.com/capsule/0.1"
+#: Namespace of the DataLab capsule terms (prefix ``dlc:``).
+TERMS_IRI = "https://datalab-platform.com/capsule/terms#"
 FINGERPRINT_KEY = "dlc:manifestFingerprint"
 EDITION_NAMES = {"desktop": "DataLab", "web": "DataLab-Web"}
 #: Licence statement used when the author gives none (RO-Crate allows text).

@@ -42,7 +42,7 @@ SHA = "sha256:" + "0" * 64
 DATE = "2026-10-03T08:00:00.000Z"
 # Fingerprint of the manifest of ``one_to_n.json`` built with SHA, 1234 and DATE.
 GOLDEN_FINGERPRINT = (
-    "sha256:a505f33f7d37c00a5280520995718d26d6ab9ef3b98b71723bbfb4ff1a13f7e2"
+    "sha256:0e2fb7c9378e513400734b7d7737e0de1b150f9a35bc68ad46a410299e57eb27"
 )
 
 
