@@ -25,7 +25,8 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[test,dev]"
       - name: Check that no application package is installed
-        run: python -c "import importlib.util as u, sys; found=[n for n in ('datalab','sigima','sigimax','guidata','qtpy') if u.find_spec(n)]; sys.exit(f'Unexpected packages: {found}' if found else 0)"
+        run: |
+        python -c "import importlib.util as u, sys; found=[n for n in ('datalab','sigima','sigimax','guidata','qtpy') if u.find_spec(n)]; sys.exit(f'Unexpected packages: {found}' if found else 0)"
       - name: Lint with Ruff
         run: |
           ruff format --check .
