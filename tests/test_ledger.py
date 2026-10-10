@@ -19,7 +19,7 @@ from datalab_capsule.environment import collect_environment
 from datalab_capsule.integrity import signal_state_facts
 from datalab_capsule.ledger import Ledger, LedgerError
 
-from .helpers import signal
+from .helpers import ROI, signal
 
 
 def _environment() -> dict:
@@ -175,16 +175,47 @@ def test_record_activity_requires_observed_inputs() -> None:
         )
 
 
-def test_fingerprintless_state_is_not_reused() -> None:
-    """An object with an ROI gets a new state at each observation."""
+def test_roi_is_part_of_the_state() -> None:
+    """Same data with another ROI is a new state; the same ROI reuses it."""
     ledger = Ledger()
-    obj = signal([1.0, 2.0, 3.0, 4.0], roi=object())
-    first = ledger.observe(
-        "00000000-0000-4000-8000-000000000001", signal_state_facts(obj)
+    uid = "00000000-0000-4000-8000-000000000001"
+    plain = ledger.observe(uid, signal_state_facts(signal([1.0, 2.0, 3.0, 4.0])))
+    with_roi = signal([1.0, 2.0, 3.0, 4.0], roi=ROI([0.0, 0.5]))
+    first = ledger.observe(uid, signal_state_facts(with_roi))
+    second = ledger.observe(uid, signal_state_facts(with_roi))
+    other = ledger.observe(
+        uid, signal_state_facts(signal([1.0, 2.0, 3.0, 4.0], roi=ROI([0.0, 0.25])))
     )
-    second = ledger.observe(
-        "00000000-0000-4000-8000-000000000001", signal_state_facts(obj)
+    assert first == second and len({plain, first, other}) == 3
+    state = ledger.states[first]
+    assert state["fingerprint"] == ledger.states[plain]["fingerprint"]
+    assert state["limits"] == []
+    assert state["roi"]["definition"]["single_rois"][0]["coords"] == [0.0, 0.5]
+    ledger.validate()
+
+
+def test_artifact_outputs() -> None:
+    """Analysis results are recorded as artifacts after the state outputs."""
+    ledger = Ledger()
+    uid = "00000000-0000-4000-8000-000000000001"
+    state_id = ledger.observe(uid, signal_state_facts(signal([1.0, 2.0])))
+    activity = ledger.record_activity(
+        call=make_call(None, None, {}, [("source", state_id)]),
+        outputs=[],
+        artifacts=[("result", "geometry", uid, "_geometry_fwhm")],
+        environment=_environment(),
+        edition="desktop",
+        origin="ordinary",
+        implementation={"package": "p", "version": None, "python_name": "p.fwhm"},
     )
-    assert first != second
-    assert ledger.states[first]["fingerprint"] is None
-    assert ledger.states[first]["limits"] == ["roi"]
+    assert activity["outputs"] == [
+        {
+            "role": "result",
+            "artifact": {
+                "kind": "geometry",
+                "object_uuid": uid,
+                "key": "_geometry_fwhm",
+            },
+        }
+    ]
+    ledger.validate()

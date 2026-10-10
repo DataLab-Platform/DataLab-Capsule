@@ -270,6 +270,7 @@ class Ledger:
             and facts.get("fingerprint") is not None
             and latest["fingerprint"] == facts["fingerprint"]
             and latest["kind"] == facts["kind"]
+            and latest.get("roi") == facts.get("roi")
         ):
             return latest["state_id"]
         return self._new_state(object_uuid, facts, None)
@@ -288,6 +289,7 @@ class Ledger:
         limits: Iterable[str] = (),
         started_at: str | None = None,
         finished_at: str | None = None,
+        artifacts: Iterable[tuple[str, str, str, str]] = (),
     ) -> dict[str, Any]:
         """Append one completed activity and create its output states.
 
@@ -303,6 +305,8 @@ class Ledger:
             limits: Reasons why the activity is not replayable.
             started_at: ISO 8601 start time (informative).
             finished_at: ISO 8601 end time (informative).
+            artifacts: Ordered ``(role, kind, object_uuid, key)`` analysis results
+             stored in an object's metadata, recorded after the state outputs.
 
         Returns:
             The appended activity.
@@ -329,6 +333,13 @@ class Ledger:
             {"role": role, "state_id": self._new_state(obj_uuid, facts, activity_id)}
             for role, obj_uuid, facts in outputs
         ]
+        output_items.extend(
+            {
+                "role": role,
+                "artifact": {"kind": kind, "object_uuid": obj_uuid, "key": key},
+            }
+            for role, kind, obj_uuid, key in artifacts
+        )
         now = utc_timestamp()
         activity = {
             "activity_id": activity_id,

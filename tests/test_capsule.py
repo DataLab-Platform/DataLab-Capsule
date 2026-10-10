@@ -18,7 +18,7 @@ from datalab_capsule import archive as archive_module
 from datalab_capsule.archive import CapsuleError, create_from_hdf5, read_capsule
 from datalab_capsule.cli import main
 from datalab_capsule.hdf5 import save_ledger
-from datalab_capsule.integrity import signal_state_facts
+from datalab_capsule.integrity import signal_state_facts, state_facts
 from datalab_capsule.ledger import Ledger
 from datalab_capsule.manifest import (
     MANIFEST_NAME,
@@ -31,7 +31,7 @@ from datalab_capsule.manifest import (
     validate_manifest,
 )
 
-from .helpers import signal
+from .helpers import ROI, image, signal
 
 FIXTURES = Path(__file__).parent / "fixtures" / "expressiveness"
 WORKSPACES = Path(__file__).parent / "fixtures" / "workspaces"
@@ -180,6 +180,23 @@ def test_create_and_read_capsule(tmp_path: Path) -> None:
         with h5py.File(buffer, "w") as h5file:
             h5file["DataLab_Version"] = "test"
         create_from_hdf5(buffer.getvalue())
+
+
+def test_states_show_kind_and_roi() -> None:
+    """Image states and ROI definitions appear in the manifest and inspection."""
+    ledger = Ledger()
+    roi_signal = signal([1.0, 2.0, 3.0, 4.0], roi=ROI([0.0, 0.5]))
+    ledger.observe("00000000-0000-4000-8000-000000000001", state_facts(roi_signal))
+    ledger.observe(
+        "00000000-0000-4000-8000-000000000002", state_facts(image(np.ones((2, 2))))
+    )
+    manifest = build_manifest(
+        ledger, {}, workspace_sha256=SHA, workspace_size=1, date_published=DATE
+    )
+    validate_manifest(manifest)
+    states = {s["kind"]: s for s in inspect_manifest(manifest)["states"]}
+    assert states["signal"]["roi"]["single_rois"][0]["coords"] == [0.0, 0.5]
+    assert states["image"]["roi"] is None
 
 
 def _zip(entries, compression=zipfile.ZIP_STORED, mode=0o644) -> bytes:

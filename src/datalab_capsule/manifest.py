@@ -294,6 +294,8 @@ def build_manifest(
         if locator is not None:
             entity["dlc:locator"] = locator["path"]
             entity["isPartOf"] = _ref(WORKSPACE_NAME)
+        if state.get("roi") is not None:
+            entity["dlc:roi"] = canonical_json(state["roi"]["definition"])
         if state.get("produced_by"):
             entity["dlc:producedBy"] = _ref(f"#activity-{state['produced_by']}")
         graph[entity_id] = entity
@@ -507,8 +509,10 @@ def inspect_manifest(manifest: Any) -> dict[str, Any]:
     states = [
         {
             "id": e["@id"],
+            "kind": e.get("dlc:kind"),
             "object_uuid": e.get("dlc:objectUuid"),
             "locator": e.get("dlc:locator"),
+            "roi": json.loads(e["dlc:roi"]) if "dlc:roi" in e else None,
             "produced_by": (e.get("dlc:producedBy") or {}).get("@id"),
             "consumed_by": consumers.get(e["@id"], []),
         }

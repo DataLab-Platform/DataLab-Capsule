@@ -22,15 +22,16 @@ from datalab_capsule.hdf5 import (
     locate_current_states,
     locate_fingerprints,
     read_block,
+    read_image,
     read_signal,
     save_ledger,
     scan_object_index,
     write_block,
 )
-from datalab_capsule.integrity import signal_state_facts
+from datalab_capsule.integrity import signal_state_facts, state_facts
 from datalab_capsule.ledger import Ledger
 
-from .helpers import signal
+from .helpers import image, signal
 
 FIXTURES = Path(__file__).parent / "fixtures" / "expressiveness"
 LEDGER_FIXTURES = sorted(
@@ -48,6 +49,19 @@ def _write_signal(h5file, path: str, sig, object_uuid: str) -> None:
     group.attrs["xunit"] = sig.xunit
     group.attrs["yunit"] = sig.yunit
     group["xydata"] = np.vstack([sig.x, sig.y])
+    group.create_group("metadata").attrs["__uuid"] = object_uuid
+
+
+def _write_image(h5file, path, data, object_uuid, coords=None, x0=0.0, dx=1.0):
+    """Write an image object with the layout of both editions."""
+    group = h5file.create_group(path)
+    group.attrs.update(
+        {"x0": x0, "y0": 0.0, "dx": dx, "dy": 1.0, "is_uniform_coords": coords is None}
+    )
+    group.attrs.update({"xunit": "mm", "yunit": "mm", "zunit": "counts"})
+    group["data"] = data
+    xcoords, ycoords = (np.array([]), np.array([])) if coords is None else coords
+    group["xcoords"], group["ycoords"] = xcoords, ycoords
     group.create_group("metadata").attrs["__uuid"] = object_uuid
 
 
@@ -132,6 +146,35 @@ def test_save_and_load_ledger() -> None:
         assert status == {old: "unavailable", stale: "unavailable"}
         h5file["/DataLab_Sig/g: G/b: B/xydata"][1, 0] = 0.5
         assert load_ledger(h5file)[1][kept] == "altered"
+
+
+def test_images_and_uncertainties_are_located() -> None:
+    """Image states (uniform or not) and signals with uncertainty are located."""
+    uniform, nonuniform, uncertain = (
+        f"00000000-0000-4000-8000-00000000001{i}" for i in (1, 2, 3)
+    )
+    data = np.arange(6, dtype=np.uint16).reshape(2, 3)
+    coords = (np.array([0.0, 1.0, 3.0]), np.array([0.0, 2.0]))
+    sig = signal([1.0, 2.0, 3.0, 4.0], dy=np.full(4, 0.1))
+    ledger = Ledger()
+    states = {
+        uniform: ledger.observe(uniform, state_facts(image(data, x0=1.0, dx=0.5))),
+        nonuniform: ledger.observe(nonuniform, state_facts(image(data, coords=coords))),
+        uncertain: ledger.observe(uncertain, state_facts(sig)),
+    }
+    with _memory_file() as h5file:
+        _write_image(h5file, "/DataLab_Ima/g: G/i1: I", data, uniform, x0=1.0, dx=0.5)
+        _write_image(h5file, "/DataLab_Ima/g: G/i2: J", data, nonuniform, coords)
+        group = h5file.create_group("/DataLab_Sig/g: G/s1: S")
+        group.attrs["xunit"], group.attrs["yunit"] = "s", ""
+        group["xydata"] = np.vstack([sig.x, sig.y, np.full(4, np.nan), sig.dy])
+        group.create_group("metadata").attrs["__uuid"] = uncertain
+        assert set(locate_current_states(h5file, ledger)) == set(states.values())
+        save_ledger(h5file, ledger)
+        assert load_ledger(h5file)[1] == {}
+        assert read_image(h5file, "/DataLab_Ima/g: G/i1: I")["dx"] == 0.5
+        h5file["/DataLab_Ima/g: G/i2: J/data"][0, 0] = 9
+        assert load_ledger(h5file)[1] == {states[nonuniform]: "altered"}
 
 
 def test_absent_block() -> None:

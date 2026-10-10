@@ -14,7 +14,12 @@ from pathlib import Path
 
 import numpy as np
 
-from datalab_capsule.integrity import canonical_json, json_digest, signal_fingerprint
+from datalab_capsule.integrity import (
+    canonical_json,
+    image_fingerprint,
+    json_digest,
+    signal_fingerprint,
+)
 
 
 def _double(bits: str) -> float:
@@ -55,6 +60,16 @@ def run(vectors_path: str) -> list[str]:
         )
         if got != case["expected"]:
             failures.append(f"fingerprint {case['name']}: {got}")
+    for case in doc.get("image_fingerprints", []):
+        coords = {
+            k: np.array(v, dtype=np.float64) if isinstance(v, list) else v
+            for k, v in case["coords"].items()
+        }
+        got = image_fingerprint(
+            np.array(case["data"], dtype=case["dtype"]), **coords, **case["units"]
+        )
+        if got != case["expected"]:
+            failures.append(f"image fingerprint {case['name']}: {got}")
     for case in doc["digests"]:
         got = json_digest(case["document"])
         if got != case["expected"]:

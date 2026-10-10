@@ -20,12 +20,17 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
-from datalab_capsule.integrity import ProvenanceError, signal_fingerprint
+from datalab_capsule.integrity import (
+    ProvenanceError,
+    image_fingerprint,
+    signal_fingerprint,
+)
 from datalab_capsule.ledger import Ledger, LedgerError
 
 __all__ = [
     "BLOCK_GROUP",
     "BLOCK_SCHEMA_VERSION",
+    "MAX_IMAGE_BYTES",
     "MAX_JSON_BYTES",
     "MAX_SIGNAL_BYTES",
     "PANEL_ROOTS",
@@ -36,6 +41,7 @@ __all__ = [
     "locate_current_states",
     "locate_fingerprints",
     "read_block",
+    "read_image",
     "read_signal",
     "save_ledger",
     "scan_object_index",
@@ -49,6 +55,8 @@ PANEL_ROOTS = {"signal": "DataLab_Sig", "image": "DataLab_Ima"}
 MAX_JSON_BYTES = 64 * 1024 * 1024
 #: Largest signal ``xydata`` dataset read for fingerprinting (bytes).
 MAX_SIGNAL_BYTES = 2 * 1024**3
+#: Largest image ``data`` dataset read for fingerprinting (bytes).
+MAX_IMAGE_BYTES = 2 * 1024**3
 
 
 class ProvenanceFormatError(ProvenanceError, ValueError):
@@ -225,6 +233,22 @@ def build_locators(
     }
 
 
+def _object_node(h5file: Any, path: str) -> Any:
+    _check_path(path)
+    node: Any = h5file
+    for part in path.strip("/").split("/"):
+        if part not in node:
+            raise ProvenanceFormatError(f"Missing object: {path}")
+        _check_link(node, part)
+        node = node[part]
+    return node
+
+
+def _text_attr(node: Any, name: str) -> str:
+    value = node.attrs.get(name, "")
+    return value.decode("utf-8") if isinstance(value, bytes) else str(value)
+
+
 def read_signal(h5file: Any, path: str) -> dict[str, Any]:
     """Read the rows and units of a signal object with h5py alone.
 
@@ -237,14 +261,7 @@ def read_signal(h5file: Any, path: str) -> dict[str, Any]:
          large or malformed.
     """
     h5py = _h5py()
-    _check_path(path)
-    parts = path.strip("/").split("/")
-    node: Any = h5file
-    for part in parts:
-        if part not in node:
-            raise ProvenanceFormatError(f"Missing object: {path}")
-        _check_link(node, part)
-        node = node[part]
+    node = _object_node(h5file, path)
     if "xydata" not in node:
         raise ProvenanceFormatError(f"Not a signal object: {path}")
     _check_link(node, "xydata")
@@ -256,33 +273,80 @@ def read_signal(h5file: Any, path: str) -> dict[str, Any]:
         raise ProvenanceFormatError(f"Invalid xydata rows: {path}")
     data = dataset[()]
     rows = list(data) + [None] * (4 - data.shape[0])
-
-    def unit(name: str) -> str:
-        value = node.attrs.get(name, "")
-        return value.decode("utf-8") if isinstance(value, bytes) else str(value)
-
     return {
         "x": rows[0],
         "y": rows[1],
         "dx": rows[2],
         "dy": rows[3],
-        "xunit": unit("xunit"),
-        "yunit": unit("yunit"),
+        "xunit": _text_attr(node, "xunit"),
+        "yunit": _text_attr(node, "yunit"),
     }
+
+
+def read_image(h5file: Any, path: str) -> dict[str, Any]:
+    """Read the data, coordinates and units of an image object with h5py alone.
+
+    Returns:
+        Keyword arguments of :func:`~datalab_capsule.integrity.image_fingerprint`
+        plus ``data``.
+
+    Raises:
+        ProvenanceFormatError: If the object is missing, linked, virtual, too
+         large or malformed.
+    """
+    h5py = _h5py()
+    node = _object_node(h5file, path)
+    arrays = {}
+    for name in ("data", "xcoords", "ycoords"):
+        if name not in node:
+            if name == "data":
+                raise ProvenanceFormatError(f"Not an image object: {path}")
+            arrays[name] = None
+            continue
+        _check_link(node, name)
+        dataset = node[name]
+        if not isinstance(dataset, h5py.Dataset):
+            raise ProvenanceFormatError(f"Invalid {name}: {path}")
+        _check_dataset(dataset, MAX_IMAGE_BYTES)
+        arrays[name] = dataset[()]
+    if arrays["data"].ndim != 2:
+        raise ProvenanceFormatError(f"Invalid image data: {path}")
+    result: dict[str, Any] = {
+        "data": arrays["data"],
+        "xunit": _text_attr(node, "xunit"),
+        "yunit": _text_attr(node, "yunit"),
+        "zunit": _text_attr(node, "zunit"),
+    }
+    if bool(node.attrs.get("is_uniform_coords", True)):
+        for name, default in (("x0", 0.0), ("y0", 0.0), ("dx", 1.0), ("dy", 1.0)):
+            result[name] = float(node.attrs.get(name, default))
+    else:
+        result["xcoords"] = arrays["xcoords"]
+        result["ycoords"] = arrays["ycoords"]
+    return result
 
 
 def locate_fingerprints(
     h5file: Any, locators: Mapping[str, Mapping[str, str]]
 ) -> dict[str, str | None]:
-    """Recompute the ``datalab-signal-v1`` fingerprint of each located signal.
+    """Recompute the fingerprint of each located signal or image.
 
     Returns:
-        ``state_id -> fingerprint value`` (None for non-signal states).
+        ``state_id -> fingerprint value``.
+
+    Raises:
+        ProvenanceFormatError: If a located object is malformed.
     """
     result: dict[str, str | None] = {}
     for state_id, locator in locators.items():
-        if locator["kind"] != "signal":
-            result[state_id] = None
+        if locator["kind"] == "image":
+            image = read_image(h5file, locator["path"])
+            try:
+                result[state_id] = image_fingerprint(image.pop("data"), **image)
+            except ValueError as exc:
+                raise ProvenanceFormatError(
+                    f"Invalid image {locator['path']}: {exc}"
+                ) from exc
             continue
         signal = read_signal(h5file, locator["path"])
         result[state_id] = signal_fingerprint(
@@ -313,7 +377,7 @@ def locate_current_states(h5file: Any, ledger: Ledger) -> dict[str, dict[str, st
         if (
             location is not None
             and state["fingerprint"] is not None
-            and location["kind"] == state["kind"] == "signal"
+            and location["kind"] == state["kind"]
         ):
             candidates[state["state_id"]] = location
     fingerprints = locate_fingerprints(h5file, candidates)

@@ -78,14 +78,26 @@
         "fingerprint": {"$ref": "#/$defs/fingerprint"},
         "dtype": {"type": "string", "minLength": 1},
         "length": {"type": "integer", "minimum": 0},
+        "shape": {"type": "array", "items": {"type": "integer", "minimum": 0}, "minItems": 2, "maxItems": 2},
         "rows": {"type": "array", "items": {"type": "string"}},
         "units": {"type": "object", "additionalProperties": {"type": "string"}},
         "limits": {"$ref": "#/$defs/limits"},
+        "roi": {
+          "description": "Region of interest of the object (masks derive from it): its definition and the digest of its canonical JSON.",
+          "type": "object",
+          "required": ["definition", "digest"],
+          "properties": {
+            "definition": {"type": "object"},
+            "digest": {"$ref": "#/$defs/digest"}
+          }
+        },
         "produced_by": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/uuid"}]},
         "sequence": {"description": "Observation order; the latest state of an object has the highest sequence.", "type": "integer", "minimum": 0}
       },
-      "if": {"properties": {"kind": {"const": "signal"}}},
-      "then": {"required": ["length"]}
+      "allOf": [
+        {"if": {"properties": {"kind": {"const": "signal"}}}, "then": {"required": ["length"]}},
+        {"if": {"properties": {"kind": {"const": "image"}}}, "then": {"required": ["shape"]}}
+      ]
     },
     "operation": {
       "oneOf": [

@@ -2,8 +2,9 @@
 
 """Integrity primitives: RFC 8785 canonical JSON, digests and state fingerprints.
 
-The ``datalab-signal-v1`` fingerprint covers the scientific content of a signal
-(dtype, length, rows, units), never its title, colours or display identifiers.
+The ``datalab-signal-v1`` and ``datalab-image-v1`` fingerprints cover the
+scientific content of a signal or an image (dtype, shape, rows or coordinates,
+units), never its title, colours or display identifiers.
 """
 
 from __future__ import annotations
@@ -14,18 +15,24 @@ from decimal import Decimal
 from typing import Any
 
 __all__ = [
+    "IMAGE_FINGERPRINT_SCHEME",
     "SIGNAL_FINGERPRINT_SCHEME",
     "CanonicalJSONError",
     "ProvenanceError",
     "canonical_json",
     "canonical_json_bytes",
+    "image_fingerprint",
+    "image_state_facts",
     "json_digest",
+    "roi_facts",
     "sha256_digest",
     "signal_fingerprint",
     "signal_state_facts",
+    "state_facts",
 ]
 
 SIGNAL_FINGERPRINT_SCHEME = "datalab-signal-v1"
+IMAGE_FINGERPRINT_SCHEME = "datalab-image-v1"
 
 # Largest integer exactly representable as an IEEE-754 double.
 _MAX_SAFE_INTEGER = 2**53
@@ -241,16 +248,18 @@ def signal_state_facts(obj: Any) -> dict[str, Any]:
     """Return the state facts of a signal-like object (duck-typed).
 
     The object must expose ``x``, ``y``, ``dx``, ``dy``, ``xunit``, ``yunit``
-    and ``roi``, as Sigima's ``SignalObj`` does. An object with an ROI,
-    uncertainty rows or a complex dtype gets a ``None`` fingerprint and the
-    reasons are listed in ``limits``.
+    and ``roi``, as Sigima's ``SignalObj`` does. Uncertainty rows are part of the
+    fingerprint; an ROI is recorded under ``roi`` (see :func:`roi_facts`). A
+    complex signal gets a ``None`` fingerprint and the reason is listed in
+    ``limits``.
 
     Args:
         obj: Signal-like object.
 
     Returns:
         Dictionary with ``kind``, ``fingerprint``, ``dtype``, ``length``,
-        ``rows``, ``units`` and ``limits`` keys.
+        ``rows``, ``units`` and ``limits`` keys, and ``roi`` when the object
+        has one.
     """
     import numpy as np  # pylint: disable=import-outside-toplevel
 
@@ -262,10 +271,6 @@ def signal_state_facts(obj: Any) -> dict[str, Any]:
         rows.append("dx")
     if _present_uncertainty(dy):
         rows.append("dy")
-    if len(rows) > 2:
-        limits.append("uncertainty")
-    if getattr(obj, "roi", None) is not None:
-        limits.append("roi")
     if y.dtype.kind == "c" or x.dtype.kind == "c":
         limits.append("complex_dtype")
     units = {"x": obj.xunit or "", "y": obj.yunit or ""}
@@ -273,9 +278,16 @@ def signal_state_facts(obj: Any) -> dict[str, Any]:
     if not limits:
         fingerprint = {
             "scheme": SIGNAL_FINGERPRINT_SCHEME,
-            "value": signal_fingerprint(x, y, None, None, units["x"], units["y"]),
+            "value": signal_fingerprint(
+                x,
+                y,
+                dx if "dx" in rows else None,
+                dy if "dy" in rows else None,
+                units["x"],
+                units["y"],
+            ),
         }
-    return {
+    facts = {
         "kind": "signal",
         "fingerprint": fingerprint,
         "dtype": y.dtype.name,
@@ -284,3 +296,151 @@ def signal_state_facts(obj: Any) -> dict[str, Any]:
         "units": units,
         "limits": limits,
     }
+    roi = roi_facts(getattr(obj, "roi", None))
+    if roi is not None:
+        facts["roi"] = roi
+    return facts
+
+
+def _json_ready(value: Any) -> Any:
+    """Return *value* with NumPy scalars and arrays turned into JSON values."""
+    if isinstance(value, dict):
+        return {str(k): _json_ready(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_ready(v) for v in value]
+    if hasattr(value, "tolist"):
+        return _json_ready(value.tolist())
+    return value
+
+
+def roi_facts(roi: Any) -> dict[str, Any] | None:
+    """Return the recorded facts of a region of interest (duck-typed), or None.
+
+    The ROI must expose ``to_dict()``, as Sigima's ROI classes do. Masks are
+    derived from the ROI, so they are covered by its definition.
+
+    Returns:
+        ``{"definition", "digest"}``; the digest identifies the definition.
+    """
+    if roi is None:
+        return None
+    definition = _json_ready(roi.to_dict())
+    return {"definition": definition, "digest": json_digest(definition)}
+
+
+def image_fingerprint(
+    data: Any,
+    *,
+    x0: float = 0.0,
+    y0: float = 0.0,
+    dx: float = 1.0,
+    dy: float = 1.0,
+    xcoords: Any = None,
+    ycoords: Any = None,
+    xunit: str | None = "",
+    yunit: str | None = "",
+    zunit: str | None = "",
+) -> str:
+    """Return the ``datalab-image-v1`` fingerprint of an image.
+
+    The payload is the canonical JSON descriptor (scheme, dtype, shape,
+    coordinates, units), a NUL byte, the data in C order and little-endian
+    byte order, then, for non-uniform coordinates, the X and Y coordinates as
+    little-endian float64.
+
+    Args:
+        data: 2-D array.
+        x0: X origin (uniform coordinates).
+        y0: Y origin (uniform coordinates).
+        dx: X pixel size (uniform coordinates).
+        dy: Y pixel size (uniform coordinates).
+        xcoords: X coordinates; non-uniform coordinates when both are given.
+        ycoords: Y coordinates.
+        xunit: X unit (``None`` is treated as ``""``).
+        yunit: Y unit (``None`` is treated as ``""``).
+        zunit: Z unit (``None`` is treated as ``""``).
+
+    Returns:
+        ``"sha256:<hex>"`` digest.
+
+    Raises:
+        ValueError: If *data* is not 2-D or coordinates do not match its shape.
+    """
+    import numpy as np  # pylint: disable=import-outside-toplevel
+
+    array = np.asarray(data)
+    if array.ndim != 2:
+        raise ValueError("Image data must be a 2-D array")
+    dtype = array.dtype.newbyteorder("<")
+    uniform = xcoords is None or ycoords is None
+    if uniform:
+        coords: dict[str, Any] = {
+            "x0": float(x0),
+            "y0": float(y0),
+            "dx": float(dx),
+            "dy": float(dy),
+        }
+        extra: list[bytes] = []
+    else:
+        xc, yc = np.asarray(xcoords), np.asarray(ycoords)
+        if xc.shape != (array.shape[1],) or yc.shape != (array.shape[0],):
+            raise ValueError("Image coordinates must match the data shape")
+        coords = {"x": int(xc.size), "y": int(yc.size)}
+        extra = [_row_bytes(xc, np.float64), _row_bytes(yc, np.float64)]
+    descriptor = {
+        "scheme": IMAGE_FINGERPRINT_SCHEME,
+        "dtype": dtype.str,
+        "shape": [int(n) for n in array.shape],
+        "coords": {"uniform" if uniform else "nonuniform": coords},
+        "units": {"x": xunit or "", "y": yunit or "", "z": zunit or ""},
+    }
+    payload = [canonical_json_bytes(descriptor), b"\x00", _row_bytes(array, dtype)]
+    payload.extend(extra)
+    return sha256_digest(b"".join(payload))
+
+
+def image_state_facts(obj: Any) -> dict[str, Any]:
+    """Return the state facts of an image-like object (duck-typed).
+
+    The object must expose ``data``, ``is_uniform_coords``, ``x0``, ``y0``,
+    ``dx``, ``dy``, ``xcoords``, ``ycoords``, ``xunit``, ``yunit``, ``zunit``
+    and ``roi``, as Sigima's ``ImageObj`` does. A complex image gets a ``None``
+    fingerprint and the reason is listed in ``limits``.
+    """
+    import numpy as np  # pylint: disable=import-outside-toplevel
+
+    data = np.asarray(obj.data)
+    units = {"x": obj.xunit or "", "y": obj.yunit or "", "z": obj.zunit or ""}
+    limits = ["complex_dtype"] if data.dtype.kind == "c" else []
+    fingerprint = None
+    if not limits:
+        if obj.is_uniform_coords:
+            coords = {"x0": obj.x0, "y0": obj.y0, "dx": obj.dx, "dy": obj.dy}
+        else:
+            coords = {"xcoords": obj.xcoords, "ycoords": obj.ycoords}
+        fingerprint = {
+            "scheme": IMAGE_FINGERPRINT_SCHEME,
+            "value": image_fingerprint(
+                data, xunit=units["x"], yunit=units["y"], zunit=units["z"], **coords
+            ),
+        }
+    facts = {
+        "kind": "image",
+        "fingerprint": fingerprint,
+        "dtype": data.dtype.name,
+        "shape": [int(n) for n in data.shape],
+        "rows": ["data"],
+        "units": units,
+        "limits": limits,
+    }
+    roi = roi_facts(getattr(obj, "roi", None))
+    if roi is not None:
+        facts["roi"] = roi
+    return facts
+
+
+def state_facts(obj: Any) -> dict[str, Any]:
+    """Return the state facts of a signal-like or image-like object."""
+    if hasattr(obj, "data") and not hasattr(obj, "xydata"):
+        return image_state_facts(obj)
+    return signal_state_facts(obj)

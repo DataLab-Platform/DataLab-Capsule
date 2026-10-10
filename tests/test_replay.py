@@ -19,7 +19,7 @@ from datalab_capsule.integrity import signal_state_facts
 from datalab_capsule.ledger import Ledger
 from datalab_capsule.replay import IneligibleError, Plan, Refusal, prepare_activity
 
-from .helpers import signal
+from .helpers import ROI, signal
 
 SRC_UUID = "00000000-0000-4000-8000-000000000001"
 DST_UUID = "00000000-0000-4000-8000-000000000002"
@@ -194,7 +194,7 @@ def test_prepare_applies_the_recorded_context() -> None:
         ({}, {}, "missing_input"),
         ({SRC_UUID: signal([-2.0, 0.0, 1.0, 5.0])}, {}, "input_changed"),
         (
-            {SRC_UUID: signal([-2.0, 0.0, 1.0, 4.0], roi=object())},
+            {SRC_UUID: signal([-2.0, 0.0, 1.0, 4.0], roi=ROI([0.0, 0.5]))},
             {},
             "unsupported_context",
         ),

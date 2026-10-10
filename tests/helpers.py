@@ -23,3 +23,33 @@ def signal(y, x=None, *, xunit: str = "s", yunit: str = "", roi=None, dy=None):
         yunit=yunit,
         roi=roi,
     )
+
+
+class ROI:
+    """Duck-typed region of interest (as Sigima's ROI classes expose)."""
+
+    def __init__(self, coords) -> None:
+        self.coords = np.asarray(coords, dtype=np.float64)
+
+    def to_dict(self) -> dict:
+        """Return the ROI definition."""
+        return {"single_rois": [{"coords": self.coords, "type": "SegmentROI"}]}
+
+
+def image(data, *, x0=0.0, y0=0.0, dx=1.0, dy=1.0, coords=None, roi=None):
+    """Return a duck-typed image object (as Sigima's ``ImageObj`` exposes)."""
+    xcoords, ycoords = (None, None) if coords is None else coords
+    return SimpleNamespace(
+        data=np.asarray(data),
+        is_uniform_coords=coords is None,
+        x0=x0,
+        y0=y0,
+        dx=dx,
+        dy=dy,
+        xcoords=xcoords,
+        ycoords=ycoords,
+        xunit="mm",
+        yunit="mm",
+        zunit="counts",
+        roi=roi,
+    )

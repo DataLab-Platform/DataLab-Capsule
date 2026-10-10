@@ -46,6 +46,10 @@
     {"name": "maximum normalization", "x": [0.0, 0.25, 0.5, 0.75], "y": [-0.5, 0.0, 0.25, 1.0], "units": {"x": "s", "y": ""}, "expected": "sha256:3be7f81fb37dbe6a6afd757d0bf4739b7c83b1503113fde64048d3edd1976ed6"},
     {"name": "amplitude normalization", "x": [0.0, 0.25, 0.5, 0.75], "y_hex": ["0000000000000000", "3fd5555555555555", "3fe0000000000000", "3ff0000000000000"], "units": {"x": "s", "y": ""}, "expected": "sha256:5c3be8fc62dfa915bc9a0da1e263b737026ec07fbff829ce2b69fd1d808ecb40"}
   ],
+  "image_fingerprints": [
+    {"name": "uint16 uniform", "dtype": "<u2", "data": [[1, 2, 3], [4, 5, 6]], "coords": {"x0": -1.0, "y0": 0.0, "dx": 0.5, "dy": 2.0}, "units": {"xunit": "mm", "yunit": "mm", "zunit": "counts"}, "expected": "sha256:66a22484bd3fb8aa0c8d9bcc2440a56fc79602d8f31f2791522c5a968fba4f28"},
+    {"name": "float64 non-uniform", "dtype": "<f8", "data": [[0.5, -1.0], [2.0, 0.25]], "coords": {"xcoords": [0.0, 3.0], "ycoords": [1.0, 1.5]}, "units": {"xunit": "mm", "yunit": "mm", "zunit": "counts"}, "expected": "sha256:d352c4c50fd8122e107741b83b81a87b5208ff396874d1992d57719387395ffd"}
+  ],
   "digests": [
     {
       "name": "manifest sample",
