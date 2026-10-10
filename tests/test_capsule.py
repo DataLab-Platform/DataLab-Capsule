@@ -216,7 +216,7 @@ def test_unsafe_names_are_refused(name: str) -> None:
         read_capsule(_zip([*_entries(), (name, b"x")]))
 
 
-def test_unsafe_archives_are_refused(monkeypatch) -> None:
+def test_unsafe_archives_are_refused() -> None:
     """Duplicates, links, encryption, oversize, ratio and tampering fail."""
     entries = _entries()
     with pytest.warns(UserWarning):
@@ -229,10 +229,9 @@ def test_unsafe_archives_are_refused(monkeypatch) -> None:
         read_capsule(_encrypted(_zip(entries)))
     with pytest.raises(CapsuleError, match="Missing"):
         read_capsule(_zip(entries[:1]))
-    monkeypatch.setitem(archive_module._LIMITS, WORKSPACE_NAME, 100)
-    with pytest.raises(CapsuleError, match="too large"):
-        read_capsule(_zip(entries))
-    monkeypatch.undo()
+    small = archive_module.SizePolicy(10**9, 10**9, 100)
+    with pytest.raises(CapsuleError, match="Entry too large"):
+        read_capsule(_zip(entries), small)
     padded = [entries[0], (WORKSPACE_NAME, entries[1][1] + b"\0" * 10**6)]
     with pytest.raises(CapsuleError, match="ratio"):
         read_capsule(_zip(padded, compression=zipfile.ZIP_DEFLATED))
@@ -241,6 +240,35 @@ def test_unsafe_archives_are_refused(monkeypatch) -> None:
         read_capsule(_zip(tampered))
     with pytest.raises(CapsuleError, match="Not a ZIP"):
         read_capsule(b"not a zip")
+
+
+class _UnreadableFile(io.FileIO):
+    """A file whose contents must not be read."""
+
+    def read(self, *args):
+        raise AssertionError("The archive was read before its size was checked")
+
+
+def test_archive_size_is_checked_before_reading(tmp_path: Path, monkeypatch) -> None:
+    """An edition policy refuses an oversized archive before reading it."""
+    data = create_from_hdf5(workspace_bytes())
+    path = tmp_path / "large.dlcapsule"
+    path.write_bytes(data)
+    limit = len(data) - 1
+    policy = archive_module.SizePolicy(limit, limit, limit)
+    with pytest.raises(CapsuleError, match="Archive too large"):
+        read_capsule(data, policy)
+    monkeypatch.setattr(
+        archive_module, "open", lambda p, _mode: _UnreadableFile(p), raising=False
+    )
+    with pytest.raises(CapsuleError, match="Archive too large"):
+        read_capsule(path, policy)
+    monkeypatch.undo()
+    exact = archive_module.SizePolicy(len(data), len(data), len(data))
+    assert read_capsule(path, exact).workspace == read_capsule(data).workspace
+    assert archive_module.DEFAULT_SIZE_POLICY.max_archive_bytes > (
+        archive_module.MAX_WORKSPACE_BYTES + archive_module.MAX_MANIFEST_BYTES
+    )
 
 
 def test_command_line(tmp_path: Path, capsys) -> None:

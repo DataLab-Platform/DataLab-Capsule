@@ -9,7 +9,13 @@ A capsule holds exactly two entries, stored without recompression:
 The reader never executes code, never accesses the network and refuses unsafe
 archives before extracting anything: absolute paths, ``..``, drive letters,
 backslashes, duplicate or unexpected entries, links, encrypted entries, and
-entries over the named limits below.
+entries over the limits below.
+
+Size limits form a :class:`SizePolicy`. The archive size is checked before the
+archive is read; the size of each entry is checked against its header before
+extraction and against the bytes actually extracted. Each edition can pass its
+own policy to :func:`read_capsule`. :data:`DEFAULT_SIZE_POLICY` is an accepted
+upper bound, not a tested capacity: the whole archive is held in memory.
 """
 
 from __future__ import annotations
@@ -34,12 +40,15 @@ from datalab_capsule.manifest import (
 
 __all__ = [
     "CAPSULE_SUFFIX",
+    "DEFAULT_SIZE_POLICY",
+    "MAX_ARCHIVE_BYTES",
     "MAX_COMPRESSION_RATIO",
     "MAX_ENTRIES",
     "MAX_MANIFEST_BYTES",
     "MAX_WORKSPACE_BYTES",
     "Capsule",
     "CapsuleError",
+    "SizePolicy",
     "create_from_hdf5",
     "read_capsule",
 ]
@@ -47,17 +56,48 @@ __all__ = [
 CAPSULE_SUFFIX = ".dlcapsule"
 #: Largest number of entries accepted in an archive.
 MAX_ENTRIES = 16
-#: Largest manifest accepted (bytes, uncompressed).
+#: Largest manifest accepted by default (bytes, uncompressed).
 MAX_MANIFEST_BYTES = 64 * 1024 * 1024
-#: Largest workspace accepted (bytes, uncompressed).
+#: Largest workspace accepted by default (bytes, uncompressed).
 MAX_WORKSPACE_BYTES = 4 * 1024**3
+#: Largest archive accepted by default (bytes): both entries plus ZIP headers.
+MAX_ARCHIVE_BYTES = MAX_MANIFEST_BYTES + MAX_WORKSPACE_BYTES + 1024 * 1024
 #: Largest uncompressed/compressed size ratio accepted for one entry.
 MAX_COMPRESSION_RATIO = 100
-_LIMITS = {MANIFEST_NAME: MAX_MANIFEST_BYTES, WORKSPACE_NAME: MAX_WORKSPACE_BYTES}
+_ENTRY_NAMES = (MANIFEST_NAME, WORKSPACE_NAME)
 
 
 class CapsuleError(ProvenanceError, ValueError):
     """Raised when a capsule cannot be created or is not safe or valid."""
+
+
+@dataclasses.dataclass(frozen=True)
+class SizePolicy:
+    """Size limits applied when reading a capsule (bytes).
+
+    Attributes:
+        max_archive_bytes: Largest archive, checked before it is read.
+        max_manifest_bytes: Largest manifest (uncompressed).
+        max_workspace_bytes: Largest workspace (uncompressed).
+    """
+
+    max_archive_bytes: int
+    max_manifest_bytes: int
+    max_workspace_bytes: int
+
+    def entry_limit(self, name: str) -> int:
+        """Return the size limit of entry *name*."""
+        if name == MANIFEST_NAME:
+            return self.max_manifest_bytes
+        return self.max_workspace_bytes
+
+
+#: Policy used when an edition does not pass its own.
+DEFAULT_SIZE_POLICY = SizePolicy(
+    max_archive_bytes=MAX_ARCHIVE_BYTES,
+    max_manifest_bytes=MAX_MANIFEST_BYTES,
+    max_workspace_bytes=MAX_WORKSPACE_BYTES,
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -73,11 +113,22 @@ class Capsule:
     workspace: bytes
 
 
-def _read_source(source: str | os.PathLike | bytes) -> bytes:
+def _read_source(source: str | os.PathLike | bytes, limit: int | None = None) -> bytes:
+    """Return the bytes of *source*, refusing more than *limit* before reading."""
     if isinstance(source, (bytes, bytearray, memoryview)):
+        if limit is not None and len(source) > limit:
+            raise CapsuleError(f"Archive too large: {len(source)} > {limit} bytes")
         return bytes(source)
     with open(source, "rb") as file:
-        return file.read()
+        if limit is None:
+            return file.read()
+        size = os.fstat(file.fileno()).st_size
+        if size > limit:
+            raise CapsuleError(f"Archive too large: {size} > {limit} bytes")
+        data = file.read(size + 1)
+    if len(data) > limit:
+        raise CapsuleError(f"Archive too large: more than {limit} bytes")
+    return data
 
 
 def create_from_hdf5(
@@ -144,7 +195,7 @@ def create_from_hdf5(
     return buffer.getvalue()
 
 
-def _check_entry(info: zipfile.ZipInfo, seen: set[str]) -> None:
+def _check_entry(info: zipfile.ZipInfo, seen: set[str], policy: SizePolicy) -> None:
     name = info.filename
     if (
         not name
@@ -157,13 +208,13 @@ def _check_entry(info: zipfile.ZipInfo, seen: set[str]) -> None:
     if name in seen:
         raise CapsuleError(f"Duplicate entry: {name}")
     seen.add(name)
-    if name not in _LIMITS:
+    if name not in _ENTRY_NAMES:
         raise CapsuleError(f"Unexpected entry: {name}")
     if info.flag_bits & 0x1:
         raise CapsuleError(f"Encrypted entry: {name}")
     if stat.S_ISLNK(info.external_attr >> 16):
         raise CapsuleError(f"Link entry: {name}")
-    if info.file_size > _LIMITS[name]:
+    if info.file_size > policy.entry_limit(name):
         raise CapsuleError(f"Entry too large: {name}")
     if (
         info.compress_type != zipfile.ZIP_STORED
@@ -172,23 +223,30 @@ def _check_entry(info: zipfile.ZipInfo, seen: set[str]) -> None:
         raise CapsuleError(f"Compression ratio too high: {name}")
 
 
-def _read_entry(archive: zipfile.ZipFile, info: zipfile.ZipInfo) -> bytes:
-    limit = _LIMITS[info.filename]
+def _read_entry(archive: zipfile.ZipFile, info: zipfile.ZipInfo, limit: int) -> bytes:
     with archive.open(info) as stream:
-        data = stream.read(limit + 1)
+        # The header size was checked against *limit*: never read past it.
+        data = stream.read(info.file_size + 1)
     if len(data) > limit or len(data) != info.file_size:
         raise CapsuleError(f"Entry size does not match its header: {info.filename}")
     return data
 
 
-def read_capsule(source: str | os.PathLike | bytes) -> Capsule:
+def read_capsule(
+    source: str | os.PathLike | bytes, policy: SizePolicy = DEFAULT_SIZE_POLICY
+) -> Capsule:
     """Read, check and validate a capsule without extracting it to disk.
 
+    Args:
+        source: Path or bytes of the capsule.
+        policy: Size limits of the calling edition.
+
     Raises:
-        CapsuleError: If the archive is unsafe, incomplete or inconsistent.
+        CapsuleError: If the archive is unsafe, too large, incomplete or
+         inconsistent.
         ManifestError: If the manifest is invalid.
     """
-    data = _read_source(source)
+    data = _read_source(source, policy.max_archive_bytes)
     try:
         archive = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile as exc:
@@ -199,11 +257,14 @@ def read_capsule(source: str | os.PathLike | bytes) -> Capsule:
             raise CapsuleError("Too many entries")
         seen: set[str] = set()
         for info in infos:
-            _check_entry(info, seen)
-        missing = set(_LIMITS) - seen
+            _check_entry(info, seen, policy)
+        missing = set(_ENTRY_NAMES) - seen
         if missing:
             raise CapsuleError(f"Missing entries: {', '.join(sorted(missing))}")
-        contents = {info.filename: _read_entry(archive, info) for info in infos}
+        contents = {
+            info.filename: _read_entry(archive, info, policy.entry_limit(info.filename))
+            for info in infos
+        }
     try:
         manifest = json.loads(contents[MANIFEST_NAME].decode("utf-8"))
     except (UnicodeDecodeError, ValueError) as exc:
