@@ -132,6 +132,15 @@ def build() -> dict[str, dict]:
                     {},
                     [("source", 1), ("operand", 2)],
                     [out("result", 3)],
+                    context={
+                        "roi": None,
+                        "mask": None,
+                        "x_alignment": {
+                            "rule": "sigima.signal.x_alignment.source_grid_linear",
+                            "version": 1,
+                            "interpolated": True,
+                        },
+                    },
                 )
             ],
         ),

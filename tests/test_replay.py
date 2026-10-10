@@ -78,6 +78,18 @@ def test_report_without_reference_is_not_verified() -> None:
     )
     assert report["verdict"] == "not_verified"
     assert report["verification_activity"]["outputs"][0]["locator"] is None
+    assert "context" not in report
+    rule = {"rule": "r", "version": 1, "interpolated": True}
+    with_context = build_report(
+        activity_id="a",
+        restoration="replayable",
+        eligibility="ready",
+        inputs=[],
+        reference=None,
+        environment=env,
+        context={"roi": None, "mask": None, "x_alignment": rule},
+    )
+    assert with_context["context"]["x_alignment"] == rule
     with pytest.raises(ReportError):
         build_report(
             activity_id="a",
@@ -151,6 +163,29 @@ def test_prepare_ready() -> None:
     assert isinstance(plan, Plan)
     assert plan.parameters == {"method": "maximum"}
     assert [role for role, _s, _o in plan.inputs] == ["source"]
+    assert plan.call_inputs == (plan.inputs[0][2],)
+
+
+def test_prepare_applies_the_recorded_context() -> None:
+    """The recorded context gives the call inputs, or refuses the replay."""
+    ledger, act_id = _ledger_with_activity()
+    ledger.activity(act_id)["context"]["x_alignment"] = {"rule": "r", "version": 1}
+    source = signal([-2.0, 0.0, 1.0, 4.0])
+    seen = []
+
+    def apply_context(contract, objs, context):
+        seen.append(context["x_alignment"])
+        if context["x_alignment"]["version"] != 1:
+            raise IneligibleError("unsupported_context", "unknown rule")
+        return [f"aligned {len(objs)}"]
+
+    plan = _prepare(ledger, act_id, {SRC_UUID: source}, apply_context=apply_context)
+    assert plan.call_inputs == ("aligned 1",) and plan.inputs[0][2] is source
+    assert seen == [{"rule": "r", "version": 1}]
+    ledger.activity(act_id)["context"]["x_alignment"]["version"] = 2
+    refusal = _prepare(ledger, act_id, {SRC_UUID: source}, apply_context=apply_context)
+    assert refusal.eligibility == "unsupported_context"
+    assert [i["status"] for i in refusal.input_statuses] == ["unsupported"]
 
 
 @pytest.mark.parametrize(

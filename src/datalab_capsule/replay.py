@@ -49,12 +49,16 @@ class Plan:
         contract: Contract object returned by the injected resolver.
         parameters: Rebuilt parameter set.
         inputs: Ordered ``(role, state_id, live object)`` triples.
+        call_inputs: Objects to pass to the function, in role order, after the
+         recorded context was applied (e.g. X alignment); the live objects are
+         never modified.
     """
 
     activity: dict[str, Any]
     contract: Any
     parameters: Any
     inputs: tuple[tuple[str, str, Any], ...]
+    call_inputs: tuple[Any, ...] = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -86,6 +90,7 @@ def prepare_activity(
     check_preconditions: Callable[[Any, list[Any]], str | None],
     decode_parameters: Callable[[Any, dict[str, Any]], Any],
     state_status: Mapping[str, str] | None = None,
+    apply_context: Callable[[Any, list[Any], dict[str, Any]], list[Any]] | None = None,
 ) -> Plan | Refusal:
     """Prepare a recorded activity for replay.
 
@@ -101,6 +106,9 @@ def prepare_activity(
         decode_parameters: ``(contract, values) -> parameters``; raises
          :class:`IneligibleError` (``invalid_parameters``).
         state_status: Statuses derived at load (``altered``, ``unavailable``).
+        apply_context: ``(contract, objects, recorded context) -> call inputs``;
+         raises :class:`IneligibleError` (``unsupported_context``) when the
+         recorded context cannot be applied. Defaults to the live objects.
 
     Returns:
         A :class:`Plan`, or a :class:`Refusal` with its eligibility code.
@@ -165,8 +173,17 @@ def prepare_activity(
         if facts["fingerprint"] != recorded:
             entry["status"] = "changed"
             return refuse("input_changed", "Input changed since the activity", checked)
+    live = [obj for _r, _s, obj in objects]
+    call_inputs = live
+    if apply_context is not None:
+        try:
+            call_inputs = apply_context(contract, live, activity.get("context") or {})
+        except IneligibleError as exc:
+            for entry in checked:
+                entry["status"] = "unsupported"
+            return refuse(exc.code, str(exc), checked)
     try:
         parameters = decode_parameters(contract, call["parameters"])
     except IneligibleError as exc:
         return refuse(exc.code, str(exc), checked)
-    return Plan(activity, contract, parameters, tuple(objects))
+    return Plan(activity, contract, parameters, tuple(objects), tuple(call_inputs))

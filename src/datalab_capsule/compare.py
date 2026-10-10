@@ -167,6 +167,7 @@ def build_report(
     comparison: dict[str, Any] | None = None,
     candidate_state_ids: list[tuple[str, str]] | None = None,
     reason: str | None = None,
+    context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble and validate a verification report.
 
@@ -181,6 +182,8 @@ def build_report(
         candidate_state_ids: ``(role, state_id)`` of the candidate outputs, when a
          verification run took place.
         reason: Optional human-readable detail.
+        context: Recorded execution context of the activity (e.g. its X-alignment
+         rule), shown as is; omitted when None.
 
     Returns:
         The report.
@@ -214,6 +217,8 @@ def build_report(
             ],
         },
     }
+    if context is not None:
+        report["context"] = context
     validate_report(report)
     return report
 

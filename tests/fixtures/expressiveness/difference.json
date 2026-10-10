@@ -127,7 +127,11 @@
         "context": {
           "roi": null,
           "mask": null,
-          "x_alignment": null
+          "x_alignment": {
+            "rule": "sigima.signal.x_alignment.source_grid_linear",
+            "version": 1,
+            "interpolated": true
+          }
         },
         "limits": [],
         "environment_id": "sha256:15423012e9ba29e9460b377d6a947f18c4e2588894925133cc7a33f6f1496fb2",

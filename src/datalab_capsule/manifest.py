@@ -210,6 +210,9 @@ def _activity_entities(
     }
     if activity.get("command_id"):
         action["dlc:commandId"] = activity["command_id"]
+    x_alignment = (activity.get("context") or {}).get("x_alignment")
+    if x_alignment is not None:
+        action["dlc:xAlignment"] = canonical_json(x_alignment)
     if activity.get("started_at"):
         action["startTime"] = activity["started_at"]
     if activity.get("finished_at"):
@@ -494,6 +497,11 @@ def inspect_manifest(manifest: Any) -> dict[str, Any]:
                     for p in _refs(action.get("dlc:parameters"))
                 },
                 "limits": action.get("dlc:limits", []),
+                "x_alignment": (
+                    json.loads(action["dlc:xAlignment"])
+                    if "dlc:xAlignment" in action
+                    else None
+                ),
             }
         )
     states = [

@@ -84,6 +84,7 @@ def test_fixture_manifests(path: Path) -> None:
         assert act["parameters"] == (call["parameters"] or {})
         if call["parameters"] is None:
             assert "parameters_not_encoded" in act["limits"]
+        assert act["x_alignment"] == original["context"]["x_alignment"]
     located = {
         s["id"].removeprefix("#state-") for s in summary["states"] if s["locator"]
     }

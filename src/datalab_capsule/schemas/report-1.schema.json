@@ -12,6 +12,7 @@
     "restoration": {"enum": ["included", "replayable", "opaque", "unavailable"]},
     "eligibility": {"enum": ["ready", "missing_input", "input_changed", "unsupported_operation", "unsupported_contract", "unsupported_context", "invalid_parameters"]},
     "reason": {"type": ["string", "null"]},
+    "context": {"type": "object"},
     "inputs": {
       "type": "array",
       "items": {
