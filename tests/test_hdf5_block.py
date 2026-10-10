@@ -12,6 +12,7 @@ import h5py
 import numpy as np
 import pytest
 
+from datalab_capsule import hdf5 as hdf5_module
 from datalab_capsule.compare import validate_report
 from datalab_capsule.hdf5 import (
     BLOCK_GROUP,
@@ -176,6 +177,18 @@ def test_invalid_block_is_refused(corrupt) -> None:
         write_block(h5file, ledger, {})
         corrupt(h5file[BLOCK_GROUP])
         with pytest.raises(ProvenanceFormatError):
+            read_block(h5file)
+
+
+def test_oversized_json_text_is_refused(monkeypatch) -> None:
+    """The JSON size limit applies to variable-length strings too."""
+    ledger = Ledger()
+    ledger.observe(OBJ_UUID, signal_state_facts(signal([1.0, 2.0, 3.0, 4.0])))
+    with _memory_file() as h5file:
+        write_block(h5file, ledger, {})
+        assert h5file[BLOCK_GROUP]["ledger_json"].dtype.kind == "O"
+        monkeypatch.setattr(hdf5_module, "MAX_JSON_BYTES", 64)
+        with pytest.raises(ProvenanceFormatError, match="too large"):
             read_block(h5file)
 
 

@@ -87,6 +87,10 @@ def _read_text(group: Any, name: str) -> str:
     if dataset.id.get_storage_size() > MAX_JSON_BYTES:
         raise ProvenanceFormatError(f"Dataset too large: {dataset.name}")
     value = dataset[()]
+    # The storage size of a variable-length string only counts its pointer.
+    size = len(value) if isinstance(value, bytes) else len(str(value).encode())
+    if size > MAX_JSON_BYTES:
+        raise ProvenanceFormatError(f"Dataset too large: {dataset.name}")
     if isinstance(value, bytes):
         try:
             value = value.decode("utf-8")
