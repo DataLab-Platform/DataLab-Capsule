@@ -38,6 +38,19 @@ Writing one attachment to a new file (an existing file is never overwritten, and
 workspace-capsule attachment workspace.dlcapsule protocol.txt protocol.txt
 ```
 
+Commands for an operator working with DataLab Desktop (`create` needs the `hdf5` extra): create a capsule from a saved workspace (optionally a revision of another capsule, with light attachments), write a review, extract the checked workspace to open it in DataLab, and exchange through a registry (only these commands use the network; everything fetched is checked):
+
+```powershell
+workspace-capsule create workspace.h5 workspace.dlcapsule [--name NAME] [--description TEXT] [--revision-of PARENT.dlcapsule] [--workspace-ref IRI] [--attach FILE]...
+workspace-capsule review workspace.dlcapsule review.json --reviewer NAME --statement TEXT [--verdict endorsed|disputed|comment] [--report report.json]...
+workspace-capsule workspace workspace.dlcapsule workspace.h5
+workspace-capsule registry list URL [--json]
+workspace-capsule registry publish URL workspace.dlcapsule [--review review.json]... --token-env VARIABLE
+workspace-capsule registry fetch URL FINGERPRINT FOLDER
+```
+
+`diff` also compares manifest files (`.json`) fetched from a registry. The [two-operator scenario](doc/scenario.md) puts these commands together with DataLab Desktop and DataLab-Web.
+
 Verifying a capsule reads the stored states with h5py; without h5py, it checks only the workspace SHA-256 and size and says so (`integrity_only`). A referenced workspace is checked only when its file is given; reports and reviews are optional:
 
 ```powershell
@@ -72,6 +85,8 @@ Reading is open; publishing needs `Authorization: Bearer <token>` when a token i
 
 ## Documentation
 
+- [Two-operator scenario](doc/scenario.md): DataLab Desktop and DataLab-Web, without server and with a registry
+- [Interoperability report](doc/interoperability.md): what the editions exchange, check and replay, findings and limits
 - [Identity, compatibility and restoration rules](doc/rules.md)
 - [API](doc/api.md)
 - [Security analysis](doc/security.md)

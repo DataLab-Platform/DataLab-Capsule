@@ -1,0 +1,61 @@
+# Interoperability report (DataLab Desktop and DataLab-Web)
+
+This report states what the two editions exchange, what each checks and replays, and what the tests show, with their limits. It covers the format of profile 0.1 and the editions on the `feature/workspace-provenance` branches (October 2026).
+
+## Editions and environments tested
+
+| | DataLab Desktop | DataLab-Web |
+| --- | --- | --- |
+| Edition | 1.3.0 (development branch) | 0.9.0 (development branch) |
+| Python | CPython 3.11.6, Windows | CPython 3.12.1 in Pyodide 0.26.4, Chromium, main thread and worker |
+| Sigima, guidata | 1.3.0, 3.16.0 (from the checkouts) | 1.3.0, 3.16.0 (wheels from the checkouts) |
+| NumPy, SciPy, h5py | 2.4.4, 1.16.3, 3.16.0 | 1.26.4, 1.12.0, 3.11.0 |
+| DataLab-Capsule | 0.1.0.dev0 | 0.1.0.dev0 |
+
+The library alone (validation, inspection, comparison, verification, registry client) also runs on CPython 3.9, 3.12 and 3.14 and in Pyodide; the registry on CPython.
+
+## What is exchanged
+
+| Item | Carried by | Checked by the recipient |
+| --- | --- | --- |
+| Workspace (signals, images, metadata, ROI, analysis results) | HDF5 file, included in the capsule or referenced by an address | SHA-256 and size against the manifest |
+| Provenance ledger (activities, calls, parameters, input and output states, environments) | HDF5 block `/DataLab_Provenance`, described by the manifest | The manifest must describe the ledger exactly |
+| Stored states | Saved objects | Fingerprint and ROI of each state (`altered` otherwise) |
+| Revision link | `dlc:revisionOf` (parent fingerprint) | Part of the child's fingerprint |
+| Light attachments | `attachments/` entries declared in the manifest | Size and SHA-256; never opened |
+| Reviews, verification reports | Separate JSON documents | Fingerprint, target revision, activities named |
+
+Identities are kept across editions: object UUIDs, state and activity identifiers, manifest and review fingerprints.
+
+## Results
+
+| Exchange | Evidence | Result |
+| --- | --- | --- |
+| Desktop chain reopened and replayed on the Web, and the reverse | E0 gate G3, reference files `desktop_chain.h5`, `web_chain.h5` | `not_verified` for the opaque activity, `exact` for the others, in both editions; environment `same` within an edition, `different` across editions |
+| Two-input differences with X alignment, analysis results, ROI | E1.1, E1.2 reference files written by each edition and reopened by the other | Same verdicts; refusals carried with their code |
+| Workspaces saved by the released DataLab 1.3.0 (no ledger) | E1.3 fixture | Legacy activities in both editions, never replayed, nothing invented |
+| Capsules between two browsers, included and referenced workspace, attachments, registry | DataLab-Web E2E `capsule_exchange.spec.ts` (CI) | Integrity, supplied documents and local replay kept apart; everything fetched from a registry checked |
+| **Two operators, Desktop and Web, without server and with a registry** (scenario of [scenario.md](scenario.md), 11 Oct 2026) | Local evidence `tracking/evidence/e5` | See below |
+
+Two-operator scenario, without server then with a registry:
+
+- A (Desktop) saved a four-activity chain; the CLI created the capsule with `protocol.txt` (`sha256:cb6b0d…`).
+- B (Web, worker) inspected it (intact), saved the attachment (identical bytes), opened it, replayed every activity: `not_verified (unsupported_operation)` for the opaque one, `exact (ready)` for the three others. B added an activity and exported the child (`sha256:7d0293…`, revision of A's). B then wrote a review citing a report.
+- A verified the child with B's report and review (valid). B's review was refused against A's own revision ("targets another capsule revision"). `diff` showed the added activity and state, a new environment and the attachment changes.
+- A extracted the child workspace and replayed it on the Desktop. There were 4 real computations, all `exact`, including the activity added on the Web; the opaque activity is `not_verified`.
+- With the registry: A published with the CLI and token; B retrieved A's revision (manifest checked) and published the child and its review from the Web. A listed the registry and fetched the child (manifest checked, review valid). The fetched manifest is identical to the child capsule's.
+
+## Findings
+
+1. **Fixed: Web workspaces holding a macro could not be opened on the Desktop development branch.** DataLab reads the macro `uid` added in its development version. When the group was missing (all Web workspaces and those saved before that version), a swallowed error left the HDF5 reader in a wrong section and the opening failed. The scenario found it; the reader now closes the section in every case, with a regression test (DataLab).
+2. **Attachments do not follow revisions.** A child revision holds only the attachments its author selects; DataLab-Web does not copy the parent's. `diff` reports it explicitly ("removed attachment"). It is up to the author to attach them again when they still apply.
+3. **Saving a workspace again changes its SHA-256.** HDF5 files are not byte-reproducible, so two exports of the same content differ in `workspace sha256` (a scientific change by rule). Stored states are compared by fingerprint and are equal.
+4. **Desktop has no capsule or replay interface.** On the Desktop, capsules are handled with the `workspace-capsule` command line, and replay goes through `DLMainWindow.verify_provenance_activity` (`scripts/provenance_demo.py`). The Web has both in its interface.
+5. **Opaque activities stay unverified.** An operation without a qualified contract (here `addition_constant`) is recorded but never replayed, in both editions.
+
+## Limits
+
+- Replay is qualified for `normalize` and `difference` only; other operations are recorded and opaque.
+- The registry has no accounts, quotas, rate limits or delete API; one token protects publishing. It must be deployed behind HTTPS and a reverse proxy (see the security analysis).
+- Fingerprints prove integrity, not authorship: reviews name their author without proving it.
+- Tested on Windows (Desktop) and Chromium (Web); the library CI also runs on Linux.
