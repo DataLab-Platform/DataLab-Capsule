@@ -45,6 +45,7 @@ import micropip
 await micropip.install("emfs:/tmp/${wheelName}")
 `);
 copyTree(py, testsDir, "/work/tests");
+copyTree(py, resolve(testsDir, "..", "examples"), "/work/examples");
 
 const result = await py.runPythonAsync(`
 import hashlib, io, json, os, sys, zipfile

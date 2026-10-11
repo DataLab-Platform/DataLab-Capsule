@@ -1,0 +1,44 @@
+{
+  "report": "datalab-verification-report",
+  "report_version": 1,
+  "activity_id": "71f8e794-b2e1-4148-b42b-eacb6b132d17",
+  "restoration": "replayable",
+  "eligibility": "ready",
+  "reason": "Synthetic fixture: reference [0, 1] and candidate [1, 2] were written by hand, not computed.",
+  "inputs": [
+    {
+      "role": "source",
+      "state_id": "dd7e7971-7c9b-4a94-b82e-6f7038a47582",
+      "status": "available"
+    },
+    {
+      "role": "operand",
+      "state_id": "fe3ad12c-9150-4784-a5bc-25c9a33624a4",
+      "status": "available"
+    }
+  ],
+  "reference": {
+    "state_id": "e3329051-46c8-456d-ab39-85551005ed74",
+    "status": "available"
+  },
+  "environment": {
+    "recorded": null,
+    "current": null,
+    "match": "unknown",
+    "differences": {}
+  },
+  "verdict": "different",
+  "rule": {
+    "kind": "exact"
+  },
+  "observed": {
+    "mismatches": 2,
+    "max_abs_error": 1.0,
+    "max_rel_error": null,
+    "undefined_abs_errors": 0,
+    "undefined_rel_errors": 1,
+    "dtype_match": true,
+    "shape_match": true
+  },
+  "verification_activity": null
+}

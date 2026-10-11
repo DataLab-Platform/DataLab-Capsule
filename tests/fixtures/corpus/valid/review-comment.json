@@ -1,0 +1,19 @@
+{
+  "review": "datalab-capsule-review",
+  "review_version": 1,
+  "target": "sha256:7d0a86f8fbad47a01eb50dfc1b0db26dae4d151cf02af3fb020416af0d96c5bf",
+  "reviewer": {
+    "name": "Corpus reviewer",
+    "identifier": null
+  },
+  "date": "2026-10-01T00:00:00Z",
+  "statement": "Legacy records are kept as stored; nothing is attested.",
+  "verdict": "comment",
+  "reports": [
+    {
+      "activity_id": "5f3df0cc-5aed-4722-821a-aa1e956ae469",
+      "verdict": "not_verified"
+    }
+  ],
+  "review_fingerprint": "sha256:41bb31f9118d7d1451df057a85548f121dd8d67b1dd37e2e60fc82170eb0f822"
+}

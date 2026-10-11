@@ -1,0 +1,19 @@
+{
+  "review": "datalab-capsule-review",
+  "review_version": 1,
+  "target": "sha256:b365290406c83dcd329624aaf5e11c1c954bce1a53899054a877439a417f723a",
+  "reviewer": {
+    "name": "Corpus reviewer",
+    "identifier": null
+  },
+  "date": "2026-10-01T00:00:00Z",
+  "statement": "A - B replays exactly on the recorded environment.",
+  "verdict": "endorsed",
+  "reports": [
+    {
+      "activity_id": "71f8e794-b2e1-4148-b42b-eacb6b132d17",
+      "verdict": "exact"
+    }
+  ],
+  "review_fingerprint": "sha256:7e84537c59adab897526de909d4b83bbf3219448dd017e8d320056ca1e3236b9"
+}

@@ -1,0 +1,263 @@
+{
+  "description": "Expected command-line results on the fixture corpus, written by hand. Paths are relative to this folder. 'json' lists expected values in the --json output: a number expected for a list is its length; 'changes' lists the diff changes of each group as 'change item [field]'.",
+  "cases": [
+    { "argv": ["validate", "valid/chain-desktop.dlcapsule"], "exit": 0 },
+    { "argv": ["validate", "valid/chain-web.dlcapsule"], "exit": 0 },
+    { "argv": ["validate", "valid/capture-desktop.dlcapsule"], "exit": 0 },
+    { "argv": ["validate", "valid/capture-web.dlcapsule"], "exit": 0 },
+    { "argv": ["validate", "valid/difference-desktop.dlcapsule"], "exit": 0 },
+    { "argv": ["validate", "valid/difference-web.dlcapsule"], "exit": 0 },
+    { "argv": ["validate", "valid/chain-renamed.dlcapsule"], "exit": 0 },
+    { "argv": ["validate", "valid/legacy.dlcapsule"], "exit": 0 },
+    { "argv": ["validate", "valid/legacy-revision.dlcapsule"], "exit": 0 },
+    { "argv": ["validate", "valid/missing-resource.dlcapsule"], "exit": 0 },
+    { "argv": ["validate", "valid/referenced.dlcapsule"], "exit": 0 },
+    { "argv": ["validate", "invalid/ledger-mismatch.dlcapsule"], "exit": 0 },
+    { "argv": ["validate", "invalid/altered-state.dlcapsule"], "exit": 0 },
+    { "argv": ["validate", "invalid/tampered-manifest.dlcapsule"], "exit": 1 },
+    { "argv": ["validate", "invalid/workspace-mismatch.dlcapsule"], "exit": 1 },
+    { "argv": ["validate", "invalid/path-traversal.dlcapsule"], "exit": 1 },
+    { "argv": ["validate", "invalid/duplicate-entry.dlcapsule"], "exit": 1 },
+    { "argv": ["validate", "invalid/missing-manifest.dlcapsule"], "exit": 1 },
+    { "argv": ["validate", "invalid/compressed-entry.dlcapsule"], "exit": 1 },
+    { "argv": ["validate", "invalid/referenced-with-workspace.dlcapsule"], "exit": 1 },
+    { "argv": ["validate", "invalid/bad-revision.dlcapsule"], "exit": 1 },
+
+    {
+      "argv": ["inspect", "valid/chain-desktop.dlcapsule", "--json"],
+      "exit": 0,
+      "json": { "activities": 4, "states": 5, "revision_of": null, "workspace": { "id": "workspace.h5", "referenced": false } }
+    },
+    {
+      "argv": ["inspect", "valid/capture-web.dlcapsule", "--json"],
+      "exit": 0,
+      "json": { "activities": 3, "states": 3 }
+    },
+    {
+      "argv": ["inspect", "valid/difference-desktop.dlcapsule", "--json"],
+      "exit": 0,
+      "json": { "activities": 2, "states": 4 }
+    },
+    {
+      "argv": ["inspect", "valid/legacy.dlcapsule", "--json"],
+      "exit": 0,
+      "json": { "activities": 6, "states": 4 }
+    },
+    {
+      "argv": ["inspect", "valid/referenced.dlcapsule", "--json"],
+      "exit": 0,
+      "json": { "workspace": { "id": "https://example.org/datalab/corpus/referenced-workspace.h5", "referenced": true } }
+    },
+
+    {
+      "argv": ["verify", "valid/chain-desktop.dlcapsule", "--json"],
+      "exit": 0,
+      "json": { "valid": true, "workspace": "verified", "states_located": 5, "states_altered": 0, "problems": 0 }
+    },
+    {
+      "argv": ["verify", "valid/chain-web.dlcapsule", "--json"],
+      "exit": 0,
+      "json": { "valid": true, "workspace": "verified", "states_located": 5, "states_altered": 0 }
+    },
+    {
+      "argv": ["verify", "valid/capture-desktop.dlcapsule", "--json"],
+      "exit": 0,
+      "json": { "valid": true, "workspace": "verified", "states_located": 3, "states_altered": 0 }
+    },
+    {
+      "argv": ["verify", "valid/capture-web.dlcapsule", "--json"],
+      "exit": 0,
+      "json": { "valid": true, "workspace": "verified", "states_located": 3, "states_altered": 0 }
+    },
+    {
+      "argv": ["verify", "valid/difference-desktop.dlcapsule", "--json"],
+      "exit": 0,
+      "json": { "valid": true, "workspace": "verified", "states_located": 4, "states_altered": 0 }
+    },
+    {
+      "argv": ["verify", "valid/difference-web.dlcapsule", "--json"],
+      "exit": 0,
+      "json": { "valid": true, "workspace": "verified", "states_located": 5, "states_altered": 0 }
+    },
+    {
+      "argv": ["verify", "valid/chain-renamed.dlcapsule", "--json"],
+      "exit": 0,
+      "json": { "valid": true, "workspace": "verified", "states_located": 5 }
+    },
+    {
+      "argv": ["verify", "valid/legacy.dlcapsule", "--json"],
+      "exit": 0,
+      "json": { "valid": true, "workspace": "verified", "states_located": 4, "states_altered": 0 }
+    },
+    {
+      "argv": ["verify", "valid/legacy-revision.dlcapsule", "--json"],
+      "exit": 0,
+      "json": { "valid": true, "workspace": "verified", "states_located": 5, "states_altered": 0 }
+    },
+    {
+      "argv": ["verify", "valid/missing-resource.dlcapsule", "--json"],
+      "exit": 0,
+      "json": { "valid": true, "workspace": "verified", "states_located": 4, "states_altered": 0 }
+    },
+    {
+      "argv": ["verify", "valid/referenced.dlcapsule", "--json"],
+      "exit": 0,
+      "json": { "valid": true, "workspace": "not_available", "states_located": null }
+    },
+    {
+      "argv": ["verify", "valid/referenced.dlcapsule", "--workspace", "sources/difference_desktop.h5", "--json"],
+      "exit": 0,
+      "json": { "valid": true, "workspace": "verified", "states_located": 4, "states_altered": 0 }
+    },
+    {
+      "argv": ["verify", "valid/referenced.dlcapsule", "--workspace", "sources/difference_web.h5", "--json"],
+      "exit": 1,
+      "json": { "valid": false, "workspace": null, "problems": ["Invalid capsule: The workspace does not match the manifest: https://example.org/datalab/corpus/referenced-workspace.h5"] }
+    },
+    {
+      "argv": ["verify", "invalid/ledger-mismatch.dlcapsule", "--json"],
+      "exit": 1,
+      "json": { "valid": false, "workspace": "verified", "problems": ["The manifest does not describe the workspace ledger"] }
+    },
+    {
+      "argv": ["verify", "invalid/altered-state.dlcapsule", "--json"],
+      "exit": 1,
+      "json": { "valid": false, "workspace": "verified", "states_located": 5, "states_altered": ["23897f46-3452-4526-9e41-a1a138e08948"] }
+    },
+    {
+      "argv": ["verify", "invalid/tampered-manifest.dlcapsule", "--json"],
+      "exit": 1,
+      "json": { "valid": false, "fingerprint": null, "problems": ["Invalid capsule: The manifest fingerprint does not match its content"] }
+    },
+    {
+      "argv": ["verify", "invalid/compressed-entry.dlcapsule", "--json"],
+      "exit": 1,
+      "json": { "valid": false, "problems": ["Invalid capsule: Compressed entry: ro-crate-metadata.json"] }
+    },
+
+    {
+      "argv": ["verify", "valid/difference-desktop.dlcapsule", "--report", "valid/report-difference-exact.json", "--report", "valid/report-difference-altered.json", "--report", "valid/report-numeric-different.json", "--review", "valid/review-endorsed.json", "--json"],
+      "exit": 0,
+      "json": {
+        "valid": true,
+        "reports": [
+          { "verdict": "exact", "status": "valid" },
+          { "verdict": "not_verified", "status": "valid" },
+          { "verdict": "different", "status": "valid" }
+        ],
+        "reviews": [{ "status": "valid" }]
+      }
+    },
+    {
+      "argv": ["verify", "valid/legacy.dlcapsule", "--report", "valid/report-legacy-opaque.json", "--review", "valid/review-comment.json", "--json"],
+      "exit": 0,
+      "json": { "valid": true, "reports": [{ "verdict": "not_verified", "status": "valid" }], "reviews": [{ "status": "valid" }] }
+    },
+    {
+      "argv": ["verify", "valid/difference-desktop.dlcapsule", "--report", "invalid/report-unknown-activity.json", "--json"],
+      "exit": 1,
+      "json": { "valid": false, "reports": [{ "status": "The report names an activity absent from the capsule" }] }
+    },
+    {
+      "argv": ["verify", "valid/difference-desktop.dlcapsule", "--report", "invalid/report-invalid.json", "--json"],
+      "exit": 1,
+      "json": { "valid": false, "reports": [{ "verdict": "probably" }], "problems": 1 }
+    },
+    {
+      "argv": ["verify", "valid/difference-desktop.dlcapsule", "--review", "invalid/review-tampered.json", "--json"],
+      "exit": 1,
+      "json": { "valid": false, "reviews": [{ "status": "The review fingerprint does not match its content" }] }
+    },
+    {
+      "argv": ["verify", "valid/difference-desktop.dlcapsule", "--review", "invalid/review-wrong-target.json", "--json"],
+      "exit": 1,
+      "json": { "valid": false, "reviews": [{ "status": "The review targets another capsule revision" }] }
+    },
+    {
+      "argv": ["verify", "valid/legacy.dlcapsule", "--review", "valid/review-endorsed.json", "--json"],
+      "exit": 1,
+      "json": { "valid": false, "reviews": [{ "status": "The review targets another capsule revision" }] }
+    },
+
+    {
+      "argv": ["diff", "valid/chain-desktop.dlcapsule", "valid/chain-desktop.dlcapsule", "--json"],
+      "exit": 0,
+      "json": { "identical": true, "revision_of_old": false }
+    },
+    {
+      "argv": ["diff", "valid/chain-desktop.dlcapsule", "valid/chain-renamed.dlcapsule", "--json"],
+      "exit": 1,
+      "json": {
+        "identical": false,
+        "revision_of_old": true,
+        "changes": { "scientific": [], "presentation": ["changed capsule description", "changed capsule name"], "environment": [] }
+      }
+    },
+    {
+      "argv": ["diff", "valid/legacy.dlcapsule", "valid/legacy-revision.dlcapsule", "--json"],
+      "exit": 1,
+      "json": {
+        "revision_of_old": true,
+        "changes": {
+          "scientific": ["added activity", "added state", "changed workspace sha256"],
+          "presentation": ["changed capsule description", "changed capsule name"],
+          "environment": ["added environment"]
+        }
+      }
+    },
+    {
+      "argv": ["diff", "valid/legacy-revision.dlcapsule", "valid/legacy.dlcapsule", "--json"],
+      "exit": 1,
+      "json": {
+        "revision_of_old": false,
+        "changes": {
+          "scientific": ["changed workspace sha256", "removed activity", "removed state"],
+          "presentation": ["changed capsule description", "changed capsule name"],
+          "environment": ["removed environment"]
+        }
+      }
+    },
+    {
+      "argv": ["diff", "valid/chain-desktop.dlcapsule", "valid/missing-resource.dlcapsule", "--json"],
+      "exit": 1,
+      "json": {
+        "revision_of_old": false,
+        "changes": {
+          "scientific": ["changed workspace sha256"],
+          "presentation": ["changed capsule description", "changed capsule name", "changed state locator"],
+          "environment": []
+        }
+      }
+    },
+    {
+      "argv": ["diff", "valid/difference-desktop.dlcapsule", "valid/referenced.dlcapsule", "--json"],
+      "exit": 1,
+      "json": {
+        "changes": {
+          "scientific": [],
+          "presentation": ["changed capsule description", "changed capsule name", "changed workspace id", "changed workspace referenced"],
+          "environment": []
+        }
+      }
+    },
+    {
+      "argv": ["diff", "valid/chain-desktop.dlcapsule", "valid/chain-web.dlcapsule", "--json"],
+      "exit": 1,
+      "json": {
+        "revision_of_old": false,
+        "changes": {
+          "scientific": [
+            "added activity", "added activity", "added activity", "added activity",
+            "added state", "added state", "added state", "added state", "added state",
+            "changed workspace sha256",
+            "removed activity", "removed activity", "removed activity", "removed activity",
+            "removed state", "removed state", "removed state", "removed state", "removed state"
+          ],
+          "presentation": ["changed capsule name"],
+          "environment": ["added environment", "removed environment"]
+        }
+      }
+    },
+    { "argv": ["diff", "valid/chain-desktop.dlcapsule", "invalid/tampered-manifest.dlcapsule"], "exit": 2 }
+  ]
+}

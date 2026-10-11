@@ -1,0 +1,52 @@
+{
+  "report": "datalab-verification-report",
+  "report_version": 1,
+  "activity_id": "71f8e794-b2e1-4148-b42b-eacb6b132d17",
+  "restoration": "replayable",
+  "eligibility": "ready",
+  "reason": null,
+  "inputs": [
+    {
+      "role": "source",
+      "state_id": "dd7e7971-7c9b-4a94-b82e-6f7038a47582",
+      "status": "available"
+    },
+    {
+      "role": "operand",
+      "state_id": "fe3ad12c-9150-4784-a5bc-25c9a33624a4",
+      "status": "available"
+    }
+  ],
+  "reference": {
+    "state_id": "e3329051-46c8-456d-ab39-85551005ed74",
+    "status": "altered"
+  },
+  "environment": {
+    "recorded": "sha256:034c81a5d7e1f441a9bb63ae1e73f9b28fd87203e335ce4357daf11f96a721ac",
+    "current": "sha256:034c81a5d7e1f441a9bb63ae1e73f9b28fd87203e335ce4357daf11f96a721ac",
+    "match": "same",
+    "differences": {}
+  },
+  "verdict": "not_verified",
+  "rule": null,
+  "observed": null,
+  "verification_activity": {
+    "origin": "verification",
+    "outputs": [
+      {
+        "role": "result",
+        "state_id": "3bb83b28-e3b4-4698-933e-d75a189c5f46",
+        "locator": null
+      }
+    ]
+  },
+  "context": {
+    "roi": null,
+    "mask": null,
+    "x_alignment": {
+      "rule": "sigima.signal.x_alignment.source_grid_linear",
+      "version": 1,
+      "interpolated": true
+    }
+  }
+}
