@@ -2,14 +2,18 @@
 
 """Workspace capsules: ``.dlcapsule`` ZIP archives holding a workspace and its manifest.
 
-A capsule holds exactly two entries, stored without recompression:
-``ro-crate-metadata.json`` (see :mod:`datalab_capsule.manifest`) and
-``workspace.h5`` (the DataLab HDF5 workspace, provenance block included).
+A capsule holds ``ro-crate-metadata.json`` (see :mod:`datalab_capsule.manifest`)
+and, when the workspace is included, ``workspace.h5`` (the DataLab HDF5 workspace,
+provenance block included), both stored without compression. A capsule may
+instead reference its workspace by an absolute IRI: the archive then holds the
+manifest only, and the workspace is obtained through a resolver passed
+explicitly by the caller; its SHA-256 and size are checked before use.
 
 The reader never executes code, never accesses the network and refuses unsafe
 archives before extracting anything: absolute paths, ``..``, drive letters,
-backslashes, duplicate or unexpected entries, links, encrypted entries, and
-entries over the limits below.
+backslashes, duplicate or unexpected entries, links, encrypted or compressed
+entries (so no decompression bomb can be read), and entries over the limits
+below.
 
 Size limits form a :class:`SizePolicy`. The archive size is checked before the
 archive is read; the size of each entry is checked against its header before
@@ -26,23 +30,25 @@ import json
 import os
 import stat
 import zipfile
+from collections.abc import Callable
 from typing import Any
 
 from datalab_capsule.hdf5 import ProvenanceFormatError, read_block
-from datalab_capsule.integrity import ProvenanceError, sha256_digest
+from datalab_capsule.integrity import ProvenanceError, load_json, sha256_digest
 from datalab_capsule.manifest import (
     MANIFEST_NAME,
+    REFERENCED_KEY,
     WORKSPACE_NAME,
     ManifestError,
     build_manifest,
     validate_manifest,
+    workspace_entity,
 )
 
 __all__ = [
     "CAPSULE_SUFFIX",
     "DEFAULT_SIZE_POLICY",
     "MAX_ARCHIVE_BYTES",
-    "MAX_COMPRESSION_RATIO",
     "MAX_ENTRIES",
     "MAX_MANIFEST_BYTES",
     "MAX_WORKSPACE_BYTES",
@@ -62,8 +68,6 @@ MAX_MANIFEST_BYTES = 64 * 1024 * 1024
 MAX_WORKSPACE_BYTES = 4 * 1024**3
 #: Largest archive accepted by default (bytes): both entries plus ZIP headers.
 MAX_ARCHIVE_BYTES = MAX_MANIFEST_BYTES + MAX_WORKSPACE_BYTES + 1024 * 1024
-#: Largest uncompressed/compressed size ratio accepted for one entry.
-MAX_COMPRESSION_RATIO = 100
 _ENTRY_NAMES = (MANIFEST_NAME, WORKSPACE_NAME)
 
 
@@ -106,11 +110,14 @@ class Capsule:
 
     Attributes:
         manifest: RO-Crate manifest.
-        workspace: Bytes of ``workspace.h5``, to pass to the editions' open path.
+        workspace: Bytes of the workspace, to pass to the editions' open path, or
+         None when it is referenced and no resolver was given.
+        workspace_ref: IRI of a referenced workspace, or None when included.
     """
 
     manifest: dict[str, Any]
-    workspace: bytes
+    workspace: bytes | None
+    workspace_ref: str | None = None
 
 
 def _read_source(source: str | os.PathLike | bytes, limit: int | None = None) -> bytes:
@@ -138,6 +145,8 @@ def create_from_hdf5(
     description: str | None = None,
     license_: str | None = None,
     date_published: str | None = None,
+    revision_of: str | None = None,
+    workspace_ref: str | None = None,
 ) -> bytes:
     """Create a capsule from a workspace file holding a provenance block.
 
@@ -147,6 +156,10 @@ def create_from_hdf5(
         description: Capsule description.
         license_: Licence statement; a neutral text is used when None.
         date_published: ISO 8601 date (defaults to now).
+        revision_of: Manifest fingerprint of the parent revision, if any.
+        workspace_ref: Absolute IRI where the workspace will be published. When
+         given, the workspace is referenced, not included: the archive holds
+         the manifest only, with the workspace's SHA-256 and size.
 
     Returns:
         The capsule bytes.
@@ -172,6 +185,8 @@ def create_from_hdf5(
             ("description", description),
             ("license_", license_),
             ("date_published", date_published),
+            ("revision_of", revision_of),
+            ("workspace_ref", workspace_ref),
         )
         if value is not None
     }
@@ -182,14 +197,16 @@ def create_from_hdf5(
         workspace_size=len(workspace),
         **options,
     )
+    entries = [(MANIFEST_NAME, json.dumps(manifest, ensure_ascii=False, indent=1))]
+    if workspace_ref is None:
+        entries.append((WORKSPACE_NAME, workspace))
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_STORED) as archive:
-        for entry, data in (
-            (MANIFEST_NAME, json.dumps(manifest, ensure_ascii=False, indent=1)),
-            (WORKSPACE_NAME, workspace),
-        ):
+        for entry, data in entries:
             info = zipfile.ZipInfo(entry, date_time=(1980, 1, 1, 0, 0, 0))
             info.compress_type = zipfile.ZIP_STORED
+            # Unix permissions, whatever the host: same bytes on every platform.
+            info.create_system = 3
             info.external_attr = (stat.S_IFREG | 0o644) << 16
             archive.writestr(info, data)
     return buffer.getvalue()
@@ -214,13 +231,10 @@ def _check_entry(info: zipfile.ZipInfo, seen: set[str], policy: SizePolicy) -> N
         raise CapsuleError(f"Encrypted entry: {name}")
     if stat.S_ISLNK(info.external_attr >> 16):
         raise CapsuleError(f"Link entry: {name}")
+    if info.compress_type != zipfile.ZIP_STORED:
+        raise CapsuleError(f"Compressed entry: {name}")
     if info.file_size > policy.entry_limit(name):
         raise CapsuleError(f"Entry too large: {name}")
-    if (
-        info.compress_type != zipfile.ZIP_STORED
-        and info.file_size > MAX_COMPRESSION_RATIO * max(info.compress_size, 1)
-    ):
-        raise CapsuleError(f"Compression ratio too high: {name}")
 
 
 def _read_entry(archive: zipfile.ZipFile, info: zipfile.ZipInfo, limit: int) -> bytes:
@@ -233,17 +247,26 @@ def _read_entry(archive: zipfile.ZipFile, info: zipfile.ZipInfo, limit: int) -> 
 
 
 def read_capsule(
-    source: str | os.PathLike | bytes, policy: SizePolicy = DEFAULT_SIZE_POLICY
+    source: str | os.PathLike | bytes,
+    policy: SizePolicy = DEFAULT_SIZE_POLICY,
+    resolve_workspace: Callable[[str], bytes] | None = None,
 ) -> Capsule:
     """Read, check and validate a capsule without extracting it to disk.
 
     Args:
         source: Path or bytes of the capsule.
         policy: Size limits of the calling edition.
+        resolve_workspace: ``IRI -> bytes`` used for a referenced workspace. It
+         is the only way a referenced workspace is obtained: nothing is fetched
+         by default. The bytes are checked against the manifest.
+
+    Returns:
+        The capsule; ``workspace`` is None for a referenced workspace without
+        resolver.
 
     Raises:
         CapsuleError: If the archive is unsafe, too large, incomplete or
-         inconsistent.
+         inconsistent, or the workspace does not match the manifest.
         ManifestError: If the manifest is invalid.
     """
     data = _read_source(source, policy.max_archive_bytes)
@@ -258,7 +281,7 @@ def read_capsule(
         seen: set[str] = set()
         for info in infos:
             _check_entry(info, seen, policy)
-        missing = set(_ENTRY_NAMES) - seen
+        missing = {MANIFEST_NAME} - seen
         if missing:
             raise CapsuleError(f"Missing entries: {', '.join(sorted(missing))}")
         contents = {
@@ -266,14 +289,34 @@ def read_capsule(
             for info in infos
         }
     try:
-        manifest = json.loads(contents[MANIFEST_NAME].decode("utf-8"))
+        manifest = load_json(contents[MANIFEST_NAME].decode("utf-8"))
     except (UnicodeDecodeError, ValueError) as exc:
         raise ManifestError(f"Invalid manifest JSON: {exc}") from exc
     validate_manifest(manifest)
-    workspace = contents[WORKSPACE_NAME]
-    entity = next(e for e in manifest["@graph"] if e["@id"] == WORKSPACE_NAME)
+    entity = workspace_entity(manifest)
+    if not entity.get(REFERENCED_KEY):
+        if WORKSPACE_NAME not in contents:
+            raise CapsuleError(f"Missing entries: {WORKSPACE_NAME}")
+        return Capsule(manifest, _checked(entity, contents[WORKSPACE_NAME]))
+    if WORKSPACE_NAME in contents:
+        raise CapsuleError(
+            f"Unexpected entry for a referenced workspace: {WORKSPACE_NAME}"
+        )
+    ref = entity["@id"]
+    if resolve_workspace is None:
+        return Capsule(manifest, None, ref)
+    workspace = resolve_workspace(ref)
+    if len(workspace) > policy.max_workspace_bytes:
+        raise CapsuleError(f"Referenced workspace too large: {ref}")
+    return Capsule(manifest, _checked(entity, bytes(workspace)), ref)
+
+
+def _checked(entity: dict[str, Any], workspace: bytes) -> bytes:
+    """Return *workspace* if its SHA-256 and size match the manifest."""
     if entity["sha256"] != sha256_digest(workspace).split(":", 1)[1] or entity[
         "contentSize"
     ] != str(len(workspace)):
-        raise CapsuleError(f"{WORKSPACE_NAME} does not match the manifest")
-    return Capsule(manifest, workspace)
+        raise CapsuleError(
+            f"The workspace does not match the manifest: {entity['@id']}"
+        )
+    return workspace

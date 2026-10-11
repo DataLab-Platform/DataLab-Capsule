@@ -10,20 +10,24 @@ units), never its title, colours or display identifiers.
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 from decimal import Decimal
 from typing import Any
 
 __all__ = [
     "IMAGE_FINGERPRINT_SCHEME",
+    "MAX_JSON_DEPTH",
     "SIGNAL_FINGERPRINT_SCHEME",
     "CanonicalJSONError",
     "ProvenanceError",
     "canonical_json",
     "canonical_json_bytes",
+    "check_json_depth",
     "image_fingerprint",
     "image_state_facts",
     "json_digest",
+    "load_json",
     "roi_facts",
     "sha256_digest",
     "signal_fingerprint",
@@ -34,6 +38,9 @@ __all__ = [
 
 SIGNAL_FINGERPRINT_SCHEME = "datalab-signal-v1"
 IMAGE_FINGERPRINT_SCHEME = "datalab-image-v1"
+#: Deepest nesting of objects and arrays accepted in JSON read from a file;
+#: capsule data nest less than 15 levels.
+MAX_JSON_DEPTH = 64
 
 # Largest integer exactly representable as an IEEE-754 double.
 _MAX_SAFE_INTEGER = 2**53
@@ -45,6 +52,38 @@ class ProvenanceError(Exception):
 
 class CanonicalJSONError(ProvenanceError, ValueError):
     """Raised when a value cannot be serialised as RFC 8785 canonical JSON."""
+
+
+def check_json_depth(value: Any, limit: int = MAX_JSON_DEPTH) -> None:
+    """Refuse objects and arrays nested deeper than *limit* (iteratively).
+
+    Raises:
+        ValueError: If *value* is nested too deeply.
+    """
+    stack = [(value, 1)] if isinstance(value, (dict, list)) else []
+    while stack:
+        item, depth = stack.pop()
+        if depth > limit:
+            raise ValueError(f"JSON nested deeper than {limit} levels")
+        children = item.values() if isinstance(item, dict) else item
+        stack.extend((c, depth + 1) for c in children if isinstance(c, (dict, list)))
+
+
+def load_json(text: str | bytes) -> Any:
+    """Parse JSON read from a file, refusing nesting deeper than the limit.
+
+    Every later step (validation, canonical JSON, digests) is recursive: the
+    limit keeps them far from the interpreter's recursion limit.
+
+    Raises:
+        ValueError: If *text* is not JSON or is nested too deeply.
+    """
+    try:
+        value = json.loads(text)
+    except RecursionError as exc:
+        raise ValueError("JSON nested too deeply") from exc
+    check_json_depth(value)
+    return value
 
 
 def _format_number(value: float) -> str:

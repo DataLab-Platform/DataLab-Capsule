@@ -28,17 +28,25 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from collections.abc import Mapping
 from importlib import resources
 from typing import Any
 
-from datalab_capsule.integrity import ProvenanceError, canonical_json, json_digest
+from datalab_capsule.integrity import (
+    ProvenanceError,
+    canonical_json,
+    json_digest,
+    load_json,
+)
 from datalab_capsule.ledger import Ledger, utc_timestamp
 
 __all__ = [
     "MANIFEST_NAME",
     "PROCESS_RUN_CRATE",
     "PROFILE_IRI",
+    "REFERENCED_KEY",
+    "REVISION_KEY",
     "RO_CRATE",
     "RO_CRATE_CONTEXT",
     "TERMS_IRI",
@@ -49,6 +57,7 @@ __all__ = [
     "load_ro_crate_context",
     "manifest_fingerprint",
     "validate_manifest",
+    "workspace_entity",
 ]
 
 MANIFEST_NAME = "ro-crate-metadata.json"
@@ -61,6 +70,29 @@ PROFILE_IRI = "https://datalab-platform.com/capsule/0.1"
 #: Namespace of the DataLab capsule terms (prefix ``dlc:``).
 TERMS_IRI = "https://datalab-platform.com/capsule/terms#"
 FINGERPRINT_KEY = "dlc:manifestFingerprint"
+#: Manifest fingerprint of the parent revision (at most one parent).
+REVISION_KEY = "dlc:revisionOf"
+_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+_ABSOLUTE_IRI = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:\S+$")
+# Properties holding canonical JSON text.
+_EMBEDDED_JSON = ("dlc:jsonValue", "dlc:roi", "dlc:legacy", "dlc:xAlignment")
+REFERENCED_KEY = "dlc:referenced"
+
+
+def workspace_entity(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the workspace ``File`` entity: included or referenced.
+
+    Raises:
+        ManifestError: If the root does not hold exactly one workspace file.
+    """
+    entities = _entities(manifest)
+    parts = [entities.get(ref) for ref in _refs(entities.get("./", {}).get("hasPart"))]
+    files = [p for p in parts if p is not None and p.get("@type") == "File"]
+    if len(files) != 1:
+        raise ManifestError("The root data entity must contain one workspace File")
+    return files[0]
+
+
 EDITION_NAMES = {"desktop": "DataLab", "web": "DataLab-Web"}
 #: Licence statement used when the author gives none (RO-Crate allows text).
 DEFAULT_LICENSE = "No licence was specified for this workspace."
@@ -251,6 +283,8 @@ def build_manifest(
     description: str = "DataLab workspace with its processing provenance.",
     license_: str = DEFAULT_LICENSE,
     date_published: str | None = None,
+    revision_of: str | None = None,
+    workspace_ref: str | None = None,
 ) -> dict[str, Any]:
     """Build the RO-Crate manifest of a capsule from a workspace's ledger.
 
@@ -264,10 +298,24 @@ def build_manifest(
         description: Description of the capsule.
         license_: Licence statement (text or IRI); never guessed.
         date_published: ISO 8601 date (defaults to now).
+        revision_of: Manifest fingerprint of the parent revision, if any.
+        workspace_ref: Absolute IRI of the workspace when it is referenced
+         instead of included as ``workspace.h5``; it is never resolved here.
 
     Returns:
         The manifest, with its fingerprint.
+
+    Raises:
+        ManifestError: If *revision_of* is not a manifest fingerprint or
+         *workspace_ref* is not an absolute IRI.
     """
+    if revision_of is not None and not _DIGEST.match(str(revision_of)):
+        raise ManifestError(f"Invalid parent revision: {revision_of!r}")
+    if workspace_ref is not None and not _ABSOLUTE_IRI.match(workspace_ref):
+        raise ManifestError(
+            f"A referenced workspace needs an absolute IRI: {workspace_ref!r}"
+        )
+    workspace_id = WORKSPACE_NAME if workspace_ref is None else workspace_ref
     graph: dict[str, dict[str, Any]] = {}
     for env_id, env in ledger.environments.items():
         entity_id = f"#environment-{env_id}"
@@ -313,7 +361,7 @@ def build_manifest(
         locator = locators.get(state_id)
         if locator is not None:
             entity["dlc:locator"] = locator["path"]
-            entity["isPartOf"] = _ref(WORKSPACE_NAME)
+            entity["isPartOf"] = _ref(workspace_id)
         if state.get("roi") is not None:
             entity["dlc:roi"] = canonical_json(state["roi"]["definition"])
         if state.get("produced_by"):
@@ -328,10 +376,12 @@ def build_manifest(
         "datePublished": date_published or utc_timestamp(),
         "license": license_,
         "conformsTo": [_ref(PROCESS_RUN_CRATE), _ref(PROFILE_IRI)],
-        "hasPart": [_ref(WORKSPACE_NAME)],
+        "hasPart": [_ref(workspace_id)],
         "mentions": [_ref(a["@id"]) for a in actions],
         "dlc:workspaceId": ledger.workspace_id,
     }
+    if revision_of is not None:
+        root[REVISION_KEY] = revision_of
     head = [
         {
             "@id": MANIFEST_NAME,
@@ -353,12 +403,13 @@ def build_manifest(
             "version": "0.1",
         },
         {
-            "@id": WORKSPACE_NAME,
+            "@id": workspace_id,
             "@type": "File",
             "name": "DataLab HDF5 workspace",
             "encodingFormat": "application/x-hdf5",
             "contentSize": str(workspace_size),
             "sha256": workspace_sha256.split(":", 1)[-1],
+            **({"dlc:referenced": True} if workspace_ref is not None else {}),
         },
     ]
     manifest = {
@@ -426,11 +477,22 @@ def validate_manifest(manifest: Any) -> None:
     for profile in (PROCESS_RUN_CRATE, PROFILE_IRI):
         if profile not in profiles:
             problems.append(f"The root data entity does not conform to {profile}")
-    if WORKSPACE_NAME not in _refs(root.get("hasPart")):
-        problems.append(f"The root data entity does not contain {WORKSPACE_NAME}")
-    workspace = entities.get(WORKSPACE_NAME, {})
-    if workspace.get("@type") != "File" or not workspace.get("sha256"):
-        problems.append(f"{WORKSPACE_NAME} must be a File with a SHA-256")
+    try:
+        workspace = workspace_entity(manifest)
+    except ManifestError as exc:
+        problems.append(str(exc))
+        workspace = {}
+    if workspace and not workspace.get("sha256"):
+        problems.append("The workspace File must have a SHA-256")
+    if workspace and (workspace["@id"] == WORKSPACE_NAME) == bool(
+        workspace.get(REFERENCED_KEY)
+    ):
+        problems.append(
+            f"The workspace is either {WORKSPACE_NAME} (included) or an absolute IRI "
+            f"marked {REFERENCED_KEY} (referenced)"
+        )
+    if workspace.get(REFERENCED_KEY) and not _ABSOLUTE_IRI.match(workspace["@id"]):
+        problems.append("A referenced workspace needs an absolute IRI")
     try:
         defined = set(load_ro_crate_context()["@context"])
     except (OSError, KeyError, ValueError) as exc:  # pragma: no cover
@@ -476,6 +538,29 @@ def validate_manifest(manifest: Any) -> None:
     fingerprint = root.get(FINGERPRINT_KEY)
     if fingerprint != manifest_fingerprint(manifest):
         problems.append("The manifest fingerprint does not match its content")
+    parent = root.get(REVISION_KEY)
+    if parent is not None and (
+        not isinstance(parent, str)
+        or not _DIGEST.match(parent)
+        or parent == fingerprint
+    ):
+        problems.append(f"{REVISION_KEY} must be the fingerprint of another manifest")
+    for entity in entities.values():
+        for key in _EMBEDDED_JSON:
+            if key not in entity:
+                continue
+            try:
+                if not isinstance(entity[key], str):
+                    raise ValueError("not a string")
+                load_json(entity[key])
+            except ValueError as exc:
+                problems.append(f"{entity['@id']}: invalid {key}: {exc}")
+    if not problems:
+        # diff and verify rely on the summary of any valid manifest.
+        try:
+            inspect_manifest(manifest)
+        except (AttributeError, IndexError, KeyError, TypeError, ValueError) as exc:
+            problems.append(f"The manifest cannot be summarised: {exc!r}")
     if problems:
         raise ManifestError("; ".join(problems))
 
@@ -490,6 +575,9 @@ def _bound(entities: dict[str, dict[str, Any]], ref: str) -> dict[str, Any]:
     }
     if "dlc:objectUuid" in binding:
         bound["object_uuid"] = binding["dlc:objectUuid"]
+    if "dlc:artifact" in binding:
+        artifact = entities.get(binding["dlc:artifact"]["@id"], {})
+        bound["result_digest"] = artifact.get("dlc:resultDigest")
     return bound
 
 
@@ -497,7 +585,7 @@ def inspect_manifest(manifest: Any) -> dict[str, Any]:
     """Summarise a manifest: activities, roles in order, states and their links."""
     entities = _entities(manifest)
     root = entities["./"]
-    workspace = entities.get(WORKSPACE_NAME, {})
+    workspace = workspace_entity(manifest)
     activities = []
     consumers: dict[str, list[str]] = {}
     for ref in _refs(root.get("mentions")):
@@ -519,17 +607,17 @@ def inspect_manifest(manifest: Any) -> dict[str, Any]:
                 "inputs": inputs,
                 "outputs": outputs,
                 "parameters": {
-                    entities[p]["name"]: json.loads(entities[p]["dlc:jsonValue"])
+                    entities[p]["name"]: load_json(entities[p]["dlc:jsonValue"])
                     for p in _refs(action.get("dlc:parameters"))
                 },
                 "limits": action.get("dlc:limits", []),
                 "x_alignment": (
-                    json.loads(action["dlc:xAlignment"])
+                    load_json(action["dlc:xAlignment"])
                     if "dlc:xAlignment" in action
                     else None
                 ),
                 "legacy": (
-                    json.loads(action["dlc:legacy"]) if "dlc:legacy" in action else None
+                    load_json(action["dlc:legacy"]) if "dlc:legacy" in action else None
                 ),
                 "observed_state": (action.get("dlc:observedState") or {}).get("@id"),
             }
@@ -539,8 +627,9 @@ def inspect_manifest(manifest: Any) -> dict[str, Any]:
             "id": e["@id"],
             "kind": e.get("dlc:kind"),
             "object_uuid": e.get("dlc:objectUuid"),
+            "fingerprint": e.get("dlc:fingerprint"),
             "locator": e.get("dlc:locator"),
-            "roi": json.loads(e["dlc:roi"]) if "dlc:roi" in e else None,
+            "roi": load_json(e["dlc:roi"]) if "dlc:roi" in e else None,
             "produced_by": (e.get("dlc:producedBy") or {}).get("@id"),
             "consumed_by": consumers.get(e["@id"], []),
         }
@@ -549,10 +638,15 @@ def inspect_manifest(manifest: Any) -> dict[str, Any]:
     ]
     return {
         "name": root.get("name"),
+        "description": root.get("description"),
+        "license": root.get("license"),
         "date_published": root.get("datePublished"),
         "profiles": _refs(root.get("conformsTo")),
         "fingerprint": root.get(FINGERPRINT_KEY),
+        "revision_of": root.get(REVISION_KEY),
         "workspace": {
+            "id": workspace["@id"],
+            "referenced": bool(workspace.get(REFERENCED_KEY)),
             "sha256": workspace.get("sha256"),
             "size": workspace.get("contentSize"),
         },

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:datalab:schema:capsule-review:1",
+  "title": "Review assertion on a DataLab capsule, version 1",
+  "description": "A statement by a reviewer about one capsule revision, identified by its manifest fingerprint. It is a separate document: it never changes the capsule. Unknown properties are tolerated so that additive changes stay compatible.",
+  "type": "object",
+  "required": ["review", "review_version", "target", "reviewer", "date", "statement", "verdict", "reports", "review_fingerprint"],
+  "properties": {
+    "review": {"const": "datalab-capsule-review"},
+    "review_version": {"const": 1},
+    "target": {"description": "Manifest fingerprint of the reviewed revision.", "$ref": "#/$defs/digest"},
+    "reviewer": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "identifier": {"description": "Optional persistent identifier, e.g. an ORCID IRI.", "type": ["string", "null"]}
+      }
+    },
+    "date": {"type": "string", "minLength": 1},
+    "statement": {"type": "string", "minLength": 1},
+    "verdict": {"description": "endorsed, disputed or comment; null when the reviewer states none.", "enum": ["endorsed", "disputed", "comment", null]},
+    "reports": {
+      "description": "Verification reports the review relies on, summarised: activity and verdict.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["activity_id", "verdict"],
+        "properties": {
+          "activity_id": {"type": "string", "minLength": 1},
+          "verdict": {"enum": ["exact", "within_tolerance", "different", "not_verified"]}
+        }
+      }
+    },
+    "review_fingerprint": {"description": "Digest of the RFC 8785 canonical JSON of the review without this property.", "$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

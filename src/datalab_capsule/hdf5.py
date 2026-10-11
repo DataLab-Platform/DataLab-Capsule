@@ -21,8 +21,10 @@ from collections.abc import Mapping
 from typing import Any
 
 from datalab_capsule.integrity import (
+    MAX_JSON_DEPTH,
     ProvenanceError,
     image_fingerprint,
+    load_json,
     signal_fingerprint,
     value_digest,
 )
@@ -166,7 +168,7 @@ def read_block(h5file: Any) -> tuple[Ledger, dict[str, dict[str, str]]] | None:
     except LedgerError as exc:
         raise ProvenanceFormatError(str(exc)) from exc
     try:
-        locators = json.loads(_read_text(group, "locators_json"))
+        locators = load_json(_read_text(group, "locators_json"))
     except ValueError as exc:
         raise ProvenanceFormatError(f"Invalid locators: {exc}") from exc
     if not isinstance(locators, dict):
@@ -332,17 +334,20 @@ def read_image(h5file: Any, path: str) -> dict[str, Any]:
     return result
 
 
-def _decode_metadata(node: Any, budget: list[int]) -> Any:
+def _decode_metadata(node: Any, budget: list[int], depth: int = 1) -> Any:
     """Decode a metadata value serialised by guidata (dicts, sequences, arrays).
 
     Groups carry ``__dict`` (mapping: scalar attributes plus child nodes) or
     ``__seq`` (``__seq<i>`` children or attributes); datasets hold arrays.
-    *budget* bounds the number of decoded nodes.
+    *budget* bounds the number of decoded nodes, :data:`MAX_JSON_DEPTH` their
+    nesting.
     """
     h5py = _h5py()
     budget[0] -= 1
     if budget[0] < 0:
         raise ProvenanceFormatError(f"Metadata too large: {node.name}")
+    if depth > MAX_JSON_DEPTH:
+        raise ProvenanceFormatError(f"Metadata nested too deeply: {node.name}")
     if isinstance(node, h5py.Dataset):
         _check_dataset(node, MAX_JSON_BYTES)
         return node[()]
@@ -352,7 +357,7 @@ def _decode_metadata(node: Any, budget: list[int]) -> Any:
             name = f"__seq{index}"
             if name in node:
                 _check_link(node, name)
-                items.append(_decode_metadata(node[name], budget))
+                items.append(_decode_metadata(node[name], budget, depth + 1))
             elif name in node.attrs:
                 items.append(node.attrs[name])
             else:
@@ -363,7 +368,7 @@ def _decode_metadata(node: Any, budget: list[int]) -> Any:
     value = {k: v for k, v in node.attrs.items() if k != "__dict"}
     for name in node:
         _check_link(node, name)
-        value[name] = _decode_metadata(node[name], budget)
+        value[name] = _decode_metadata(node[name], budget, depth + 1)
     return value
 
 

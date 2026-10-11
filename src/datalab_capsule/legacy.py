@@ -38,12 +38,11 @@ Issues found at import are listed in each activity (``legacy.issues``):
 from __future__ import annotations
 
 import dataclasses
-import json
 import re
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
-from datalab_capsule.integrity import _json_ready
+from datalab_capsule.integrity import _json_ready, load_json
 from datalab_capsule.ledger import Ledger
 
 __all__ = [
@@ -115,7 +114,7 @@ def _parameters(text: Any) -> tuple[Any, list[str]]:
     read = []
     for item in texts:
         try:
-            payload = json.loads(item) if isinstance(item, str) else None
+            payload = load_json(item) if isinstance(item, str) else None
         except ValueError:
             payload = None
         if not isinstance(payload, dict):

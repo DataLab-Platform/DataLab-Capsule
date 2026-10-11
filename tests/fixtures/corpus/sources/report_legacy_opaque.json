@@ -1,0 +1,21 @@
+{
+  "report": "datalab-verification-report",
+  "report_version": 1,
+  "activity_id": "5f3df0cc-5aed-4722-821a-aa1e956ae469",
+  "restoration": "opaque",
+  "eligibility": "unsupported_operation",
+  "reason": "The call names no qualified operation",
+  "inputs": [],
+  "reference": null,
+  "environment": {
+    "recorded": null,
+    "current": "sha256:034c81a5d7e1f441a9bb63ae1e73f9b28fd87203e335ce4357daf11f96a721ac",
+    "match": "unknown",
+    "differences": {}
+  },
+  "verdict": "not_verified",
+  "rule": null,
+  "observed": null,
+  "verification_activity": null,
+  "context": {}
+}

@@ -275,9 +275,8 @@ def test_unsafe_archives_are_refused() -> None:
     small = archive_module.SizePolicy(10**9, 10**9, 100)
     with pytest.raises(CapsuleError, match="Entry too large"):
         read_capsule(_zip(entries), small)
-    padded = [entries[0], (WORKSPACE_NAME, entries[1][1] + b"\0" * 10**6)]
-    with pytest.raises(CapsuleError, match="ratio"):
-        read_capsule(_zip(padded, compression=zipfile.ZIP_DEFLATED))
+    with pytest.raises(CapsuleError, match="Compressed"):
+        read_capsule(_zip(entries, compression=zipfile.ZIP_DEFLATED))
     tampered = [entries[0], (WORKSPACE_NAME, entries[1][1][:-1] + b"\1")]
     with pytest.raises(CapsuleError, match="does not match"):
         read_capsule(_zip(tampered))

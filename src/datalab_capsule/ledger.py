@@ -24,7 +24,7 @@ from typing import Any
 from datalab_capsule._schema import load_schema, schema_errors
 from datalab_capsule.calls import CallError, is_opaque, validate_call
 from datalab_capsule.environment import EDITIONS, environment_id
-from datalab_capsule.integrity import ProvenanceError, value_digest
+from datalab_capsule.integrity import ProvenanceError, load_json, value_digest
 
 __all__ = [
     "LEDGER_SCHEMA",
@@ -206,7 +206,7 @@ class Ledger:
             LedgerError: If *text* is not valid JSON or not a valid ledger.
         """
         try:
-            data = json.loads(text)
+            data = load_json(text)
         except (TypeError, ValueError) as exc:
             raise LedgerError(f"Ledger is not valid JSON: {exc}") from exc
         return cls.from_dict(data)
