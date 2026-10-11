@@ -58,6 +58,18 @@ Reading and checking a capsule without this package, with `json`, `zipfile`, `ha
 python examples/third_party_reader.py workspace.dlcapsule
 ```
 
+## Registry (optional)
+
+A small registry publishes and serves capsule manifests, the attachments they declare and their reviews, so that revisions can be found, compared and discussed. It never stores workspaces: a manifest names its workspace by SHA-256 and size (and by address when it is referenced). Everything keeps working without a registry. Manifests are validated and identified by their fingerprint, attachments must match their declared size and SHA-256, reviews must target a published revision. Metadata is kept in SQLite and documents in files.
+
+```powershell
+pip install "DataLab-Capsule[registry]"
+$env:REGISTRY_TOKEN = "<secret>"
+workspace-capsule-registry registry-data --token-env REGISTRY_TOKEN --origin https://web.example
+```
+
+Reading is open; publishing needs `Authorization: Bearer <token>` when a token is set (without one, publishing is open: local use only). The API is described at `/docs` and `/openapi.json`; see [API](doc/api.md#registry).
+
 ## Documentation
 
 - [Identity, compatibility and restoration rules](doc/rules.md)

@@ -24,6 +24,9 @@ Scope: DataLab-Capsule 0.1.0.dev0 (profile 0.1) and its use by DataLab Desktop a
 | **Forged or misdirected reviews and reports** | A review's own fingerprint and its target revision are checked; cited reports must name activities of the capsule; reports are validated against their schema. | corpus `review-*`, `report-*` |
 | **Misleading claims** about old results | Legacy records claim no result; they name the state observed at opening separately, and are never replayed. | `test_legacy.py` |
 | **Leak of personal data** | Environment records hold no host or user names. | `test_environment.py` |
+| **Registry: forged or unwanted publications** | Writes need a bearer token when one is configured (compared in constant time); the token comes from an environment variable, never from the command line. Manifests are validated and identified by fingerprint, attachments must match their declaration, reviews must target a published revision; a document published twice is stored once. | `test_registry.py` |
+| **Registry: path traversal and storage exhaustion** | Fingerprints must be `sha256:` plus 64 hex digits and attachment names follow the profile; files are named by digest. Bodies are read with a limit (8 MiB manifest, 16 MiB attachment, 1 MiB review) and refused as soon as it is exceeded. | `test_registry.py` |
+| **Registry: content run in a browser** (stored scripts, HTML) | Attachments are always served as `application/octet-stream`, `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`; manifests and reviews as `application/json`. Cross-origin access is limited to configured origins, without credentials. | `test_registry.py` |
 
 ## Residual risks
 
@@ -34,6 +37,7 @@ Scope: DataLab-Capsule 0.1.0.dev0 (profile 0.1) and its use by DataLab Desktop a
 - **Attachment content.** An attachment is checked for integrity only: its content is whatever the author put in it. A recipient who opens it with another application takes the risks of that application.
 - **Text shown to users.** Names, statements, titles and parameter values come from the file. User interfaces must display them as plain text, never as HTML or rich text (in Qt, a `QLabel` interprets HTML unless its text format is set to plain text).
 - **Dependencies.** `jsonschema` (and its dependencies), NumPy and h5py are trusted. Their versions are pinned by the editions and by the Pyodide distribution.
+- **Registry deployment.** The registry has no accounts, quotas or rate limits: one token allows publishing, and its holder can fill the disk within the size limits. Serve it behind HTTPS and a reverse proxy with rate limits; publishing without a token is for local use only. A published document is never deleted through the API.
 
 ## Reporting
 

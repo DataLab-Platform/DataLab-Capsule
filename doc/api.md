@@ -62,6 +62,24 @@ changes = diff_manifests(old.manifest, new.manifest)
 
 `workspace-capsule validate | inspect | diff | verify | attachment` (see the README). `cli.main(argv)` runs it and returns the exit code.
 
+## Registry
+
+`registry.Registry(root, *, max_manifest_bytes=8 MiB, max_attachment_bytes=16 MiB)` keeps manifests, declared attachments and reviews in a directory (SQLite plus files); it needs only the standard library (`sqlite3`, so not Pyodide). `registry_app.create_app(registry, *, token=None, origins=("*",))` returns the FastAPI application (`registry` extra); `workspace-capsule-registry ROOT [--host] [--port] [--token-env VARIABLE] [--origin ORIGIN]...` serves it.
+
+| Method and route (`/api/v1`) | `Registry` method | Result |
+| --- | --- | --- |
+| `GET /status` | | Registry name, version, whether publishing needs a token. |
+| `GET /revisions?limit=` | `list_revisions(limit)` | Flat list, most recently published first: fingerprint, name, description, `revision_of`, dates, `workspace_referenced`, attachments (`stored` once uploaded), number of reviews. |
+| `POST /revisions` (manifest JSON) | `publish_manifest(data)` | Validates and stores it; 201 when created, 200 when already published. |
+| `GET /revisions/{fingerprint}` | `get_manifest(fingerprint)` | The manifest as published. |
+| `PUT /revisions/{fingerprint}/attachments/{name}` (raw bytes) | `put_attachment(fingerprint, name, data)` | Stores a declared attachment whose size and SHA-256 match; 204. |
+| `GET /revisions/{fingerprint}/attachments/{name}` | `get_attachment(fingerprint, name)` | The bytes, checked again, served as `application/octet-stream` with `Content-Disposition: attachment` and `nosniff`. |
+| `GET /revisions/{fingerprint}/reviews` | `list_reviews(fingerprint)` | Reviews of the revision, oldest first. |
+| `POST /reviews` (review JSON) | `publish_review(data)` | Validates it against its published target; 201 or 200. |
+| `GET /reviews/{fingerprint}` | `get_review(fingerprint)` | The review as published. |
+
+Errors: 401 without the token for a write, 404 for an unknown revision, attachment or review (`RegistryNotFound`), 413 for an oversized body, 422 for an invalid document or fingerprint (`RegistryError`).
+
 ## Schemas
 
 | File | `$id` | Document |
