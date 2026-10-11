@@ -87,6 +87,7 @@ Reading is open; publishing needs `Authorization: Bearer <token>` when a token i
 
 - [Two-operator scenario](doc/scenario.md): DataLab Desktop and DataLab-Web, without server and with a registry
 - [Interoperability report](doc/interoperability.md): what the editions exchange, check and replay, findings and limits
+- [Developer notes](doc/development.md) and [deployment notes](doc/deployment.md) (registry, profile pages)
 - [Identity, compatibility and restoration rules](doc/rules.md)
 - [API](doc/api.md)
 - [Security analysis](doc/security.md)

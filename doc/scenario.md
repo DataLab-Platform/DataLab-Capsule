@@ -14,6 +14,7 @@ This scenario exchanges a processing chain between two operators, first without 
 ## Prerequisites
 
 - Operator A: DataLab (Desktop) and DataLab-Capsule. The command line alone needs only `pip install DataLab-Capsule`; `create` also needs `pip install "DataLab-Capsule[hdf5]"`, and the registry `pip install "DataLab-Capsule[registry]"`.
+- Replay on the Desktop (step 5) uses `scripts/provenance_demo.py`, which is not installed with DataLab: it needs a checkout of the DataLab repository (`git clone https://github.com/DataLab-Platform/DataLab.git`, at the version installed) and pytest in the same environment (`pip install pytest`), since it reuses DataLab's test helpers.
 - Operator B: DataLab-Web in Chromium, Firefox or Edge, with DataLab-Capsule available to the runtime.
 - No account and no network are needed without the registry. The registry is optional: everything else works without it.
 
@@ -38,7 +39,7 @@ In _File > Workspace capsule…_:
 
 1. _Inspect_, _Choose a capsule…_: the integrity is computed from the files (manifest, workspace, stored states); nothing is opened or recomputed. The attachments are listed; _Save…_ writes one to disk, never opens it.
 2. _Open as workspace_, then _Local replay_: _Replay_ recomputes each activity in the browser and compares it with the stored result (`exact`, `different`, or `not_verified` with its reason, e.g. an opaque operation). _Save report…_ keeps a verification report.
-3. Continue the processing, then _Export_ with _Revision of chain_ checked: the child capsule names its parent by fingerprint.
+3. Continue the processing, then _Export_ with _Revision of chain_ checked: the child capsule names its parent by fingerprint. A child revision does not copy the parent's attachments: the export names those not selected again, to add with _Add attachments…_ if they still apply (the parent's attachment was saved in step 1).
 4. _Inspect_ the child, write a review (reviewer, statement, verdict), _Cite a report…_, _Save the review…_.
 
 Send the child capsule, the review and the report to operator A.
@@ -51,13 +52,16 @@ workspace-capsule verify chain.dlcapsule --review review.json   # refused: the r
 workspace-capsule diff chain.dlcapsule child.dlcapsule
 ```
 
-`diff` sorts the changes into scientific, presentation, environment and attachment changes. Attachment changes are listed without interpretation: a protocol or a calibration certificate may matter scientifically, the reader judges.
+`diff` sorts the changes into scientific, presentation, storage, environment and attachment changes, and states a scientific conclusion. A new workspace file (different bytes) is a storage change: it does not show a scientific change, and the comparison never concludes equality beyond what the manifests record. Attachment changes are listed without interpretation: a protocol or a calibration certificate may matter scientifically, the reader judges.
 
 ### 5. Operator A: replay on the Desktop
 
 ```powershell
 workspace-capsule workspace child.dlcapsule child.h5
-python scripts/run_with_env.py python scripts/provenance_demo.py OUTDIR child.h5   # from the DataLab repository
+# from the DataLab checkout, in the environment where DataLab and pytest are installed:
+python scripts/provenance_demo.py OUTDIR child.h5
+# in a development checkout (sibling repositories on PYTHONPATH through .env):
+# python scripts/run_with_env.py python scripts/provenance_demo.py OUTDIR child.h5
 ```
 
 `child.h5` opens in DataLab like any workspace. DataLab Desktop has no replay command in its interface yet: the script reopens the workspace in a fresh window and verifies every recorded activity (`DLMainWindow.verify_provenance_activity`), counting the real computations, and writes the reports to `OUTDIR/desktop_reports.json`. The activities added in DataLab-Web replay on the Desktop.
