@@ -225,6 +225,9 @@ def _activity_entities(
         action["dlc:environment"] = _ref(f"#environment-{activity['environment_id']}")
     if activity.get("legacy") is not None:
         action["dlc:legacy"] = canonical_json(activity["legacy"])
+        observed = activity["legacy"].get("observed_state_id")
+        if observed is not None:
+            action["dlc:observedState"] = _ref(f"#state-{observed}")
     if activity.get("command_id"):
         action["dlc:commandId"] = activity["command_id"]
     x_alignment = (activity.get("context") or {}).get("x_alignment")
@@ -528,6 +531,7 @@ def inspect_manifest(manifest: Any) -> dict[str, Any]:
                 "legacy": (
                     json.loads(action["dlc:legacy"]) if "dlc:legacy" in action else None
                 ),
+                "observed_state": (action.get("dlc:observedState") or {}).get("@id"),
             }
         )
     states = [

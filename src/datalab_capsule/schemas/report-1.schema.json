@@ -76,8 +76,10 @@
           "required": ["mismatches", "max_abs_error", "max_rel_error"],
           "properties": {
             "mismatches": {"type": "integer", "minimum": 0},
-            "max_abs_error": {"type": ["number", "null"]},
-            "max_rel_error": {"type": ["number", "null"]},
+            "max_abs_error": {"description": "Largest absolute error, or null when it is undefined for at least one mismatch.", "type": ["number", "null"]},
+            "max_rel_error": {"description": "Largest relative error, or null when it is undefined for at least one mismatch (e.g. a zero reference value).", "type": ["number", "null"]},
+            "undefined_abs_errors": {"description": "Mismatches whose absolute error is undefined (NaN placed differently, infinities).", "type": "integer", "minimum": 0},
+            "undefined_rel_errors": {"description": "Mismatches whose relative error is undefined.", "type": "integer", "minimum": 0},
             "dtype_match": {"type": "boolean"},
             "shape_match": {"type": "boolean"}
           }

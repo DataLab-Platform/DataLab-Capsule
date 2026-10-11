@@ -224,12 +224,13 @@
         "started_at": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/timestamp"}]},
         "finished_at": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/timestamp"}]},
         "legacy": {
-          "description": "legacy_metadata activities: the processing record found in the object's metadata (as stored), the version that saved the file and the issues found at import.",
+          "description": "legacy_metadata activities: the processing record found in the object's metadata (as stored), the version that saved the file, the issues found at import and, for a processing record, the state of the holding object observed when the workspace was opened (not attested as the historical result, which is why the activity has no outputs).",
           "type": "object",
           "required": ["key", "object_uuid", "record", "saved_by_version", "issues"],
           "properties": {
             "key": {"type": "string", "minLength": 1},
             "object_uuid": {"$ref": "#/$defs/uuid"},
+            "observed_state_id": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/uuid"}]},
             "saved_by_version": {"type": ["string", "null"]},
             "issues": {"type": "array", "items": {"type": "string", "minLength": 1}}
           }
@@ -238,7 +239,7 @@
       "allOf": [
         {
           "if": {"properties": {"origin": {"const": "legacy_metadata"}}},
-          "then": {"required": ["legacy"]},
+          "then": {"required": ["legacy"], "properties": {"outputs": {"maxItems": 0}}},
           "else": {
             "properties": {
               "environment_id": {"$ref": "#/$defs/digest"},

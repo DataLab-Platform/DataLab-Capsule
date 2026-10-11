@@ -40,7 +40,8 @@ def test_compare_exact() -> None:
     assert result["observed"]["max_abs_error"] == 0.5
     assert result["observed"]["max_rel_error"] == 0.5
     nan_moved = {"x": np.array([0.0, 1.0]), "y": np.array([np.nan, 1.0])}
-    assert compare_exact(nan_moved, ref)["observed"]["mismatches"] == 2
+    moved = compare_exact(nan_moved, ref)["observed"]
+    assert moved["mismatches"] == 2 and moved["max_abs_error"] is None
     float32 = {k: v.astype(np.float32) for k, v in ref.items()}
     assert compare_exact(float32, ref)["verdict"] == "different"
     short = {"x": np.array([0.0]), "y": np.array([1.0])}
@@ -48,6 +49,33 @@ def test_compare_exact() -> None:
     zero_ref = {"y": np.array([0.0])}
     observed = compare_exact({"y": np.array([1.0])}, zero_ref)["observed"]
     assert observed["max_rel_error"] is None and observed["max_abs_error"] == 1.0
+
+
+def test_undefined_errors_are_not_hidden() -> None:
+    """A maximum is never computed over the defined errors only."""
+    result = compare_exact({"y": np.array([1.0, 2.0])}, {"y": np.array([0.0, 1.0])})
+    assert result["verdict"] == "different"
+    observed = result["observed"]
+    assert observed["mismatches"] == 2 and observed["max_abs_error"] == 1.0
+    # The relative error is undefined for the zero reference: no misleading 1.
+    assert observed["max_rel_error"] is None
+    assert (observed["undefined_abs_errors"], observed["undefined_rel_errors"]) == (
+        0,
+        1,
+    )
+    moved = compare_exact(
+        {"y": np.array([np.nan, 1.0, 3.0])}, {"y": np.array([1.0, np.nan, 2.0])}
+    )["observed"]
+    assert moved["mismatches"] == 3
+    assert moved["max_abs_error"] is None and moved["max_rel_error"] is None
+    assert (moved["undefined_abs_errors"], moved["undefined_rel_errors"]) == (2, 2)
+    infinite = compare_exact({"y": np.array([np.inf])}, {"y": np.array([1.0])})
+    assert infinite["observed"]["max_abs_error"] is None
+    defined = compare_exact({"y": np.array([1.0, 3.0])}, {"y": np.array([1.0, 2.0])})
+    assert defined["observed"]["max_rel_error"] == 0.5
+    assert defined["observed"]["undefined_rel_errors"] == 0
+    same = compare_exact({"y": np.array([0.0])}, {"y": np.array([0.0])})["observed"]
+    assert (same["max_abs_error"], same["max_rel_error"]) == (0.0, 0.0)
 
 
 def test_environment_comparison() -> None:

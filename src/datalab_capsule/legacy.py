@@ -14,8 +14,11 @@ The record is kept as stored and nothing missing is invented:
 - the call is opaque and has no parameters: the stored parameter text is kept in
   the record, read as plain JSON (no class is imported) when possible;
 - environment, edition, implementation and times are unknown (null);
-- the object's current state is the output, observed when the workspace was
-  opened: the record does not prove that the object was not changed since;
+- the historical result is not attested: the activity has no outputs. For a
+  processing record, the state of the holding object observed when the workspace
+  was opened is recorded as an ordinary observed state (no producer) and named
+  by ``legacy.observed_state_id``; the data may have been changed since the
+  processing without the record changing;
 - a legacy activity is never replayed.
 
 Issues found at import are listed in each activity (``legacy.issues``):
@@ -138,7 +141,7 @@ def _legacy_record(
     version_issues: list[str],
     saved_version: str | None,
 ) -> tuple[list[tuple[str, str]], dict[str, Any], bool]:
-    """Return the inputs, the legacy description and whether a state is output."""
+    """Return the inputs, the legacy description and whether to observe a state."""
     record = obj.metadata[key]
     if not isinstance(record, Mapping):
         legacy = {
@@ -221,18 +224,20 @@ def import_legacy(
         for key in (PROCESSING_KEY, ANALYSIS_KEY):
             if key not in obj.metadata:
                 continue
-            inputs, legacy, has_output = _legacy_record(
+            inputs, legacy, observes = _legacy_record(
                 obj, key, present, is_known, version_issues, saved_version
             )
-            outputs = []
-            if has_output:
+            if observes:
                 if obj.facts is None:
+                    legacy["observed_state_id"] = None
                     legacy["issues"].append("output_not_observed")
                 else:
-                    outputs.append(("result", obj.object_uuid, obj.facts))
+                    legacy["observed_state_id"] = ledger.observe(
+                        obj.object_uuid, obj.facts
+                    )
             recorded.append(
                 ledger.record_legacy_activity(
-                    inputs=inputs, outputs=outputs, legacy=legacy, limits=[LEGACY_LIMIT]
+                    inputs=inputs, legacy=legacy, limits=[LEGACY_LIMIT]
                 )
             )
     return recorded
@@ -244,9 +249,10 @@ def legacy_summary(ledger: Ledger) -> dict[str, Any]:
     Returns:
         ``{"activities", "issues", "items"}``: number of legacy activities, count
         of each issue, and one ``{"activity_id", "object_uuid", "key",
-        "operation", "pattern", "inputs", "issues"}`` item per activity
-        (``object_uuid`` is the object holding the record, ``inputs`` the
-        recorded source objects).
+        "operation", "pattern", "inputs", "observed_state_id", "issues"}`` item
+        per activity (``object_uuid`` is the object holding the record, ``inputs``
+        the recorded source objects, ``observed_state_id`` its state observed at
+        opening, not attested as the historical result).
     """
     items = []
     counts: dict[str, int] = {}
@@ -267,6 +273,7 @@ def legacy_summary(ledger: Ledger) -> dict[str, Any]:
                 "inputs": [
                     i["binding"]["object_uuids"][0] for i in activity["call"]["inputs"]
                 ],
+                "observed_state_id": legacy.get("observed_state_id"),
                 "issues": list(legacy["issues"]),
             }
         )

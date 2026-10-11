@@ -119,6 +119,10 @@ def validate_ledger(data: Any) -> None:
                 problems.append(f"{where}: unknown input state")
         if legacy and not is_opaque(activity["call"]):
             problems.append(f"{where}: a legacy activity is never qualified")
+        if legacy:
+            observed = activity["legacy"].get("observed_state_id")
+            if observed is not None and observed not in states:
+                problems.append(f"{where}: unknown observed state")
         if (
             is_opaque(activity["call"])
             and activity["implementation"] is None
@@ -400,7 +404,6 @@ class Ledger:
         self,
         *,
         inputs: Iterable[tuple[str, str]],
-        outputs: Iterable[tuple[str, str, dict[str, Any]]],
         legacy: dict[str, Any],
         limits: Iterable[str] = (),
     ) -> dict[str, Any]:
@@ -409,14 +412,16 @@ class Ledger:
         What the metadata does not say stays unknown: inputs are bound to objects
         (their state at execution time is unknown), the call is opaque with no
         parameters, and environment, edition, implementation and times are null.
-        Such an activity is never replayed.
+        The historical result is not attested, so the activity has no outputs;
+        the state of the holding object observed when the workspace was opened
+        may be named by ``legacy["observed_state_id"]``, an observed state that
+        the activity did not produce. Such an activity is never replayed.
 
         Args:
             inputs: Ordered ``(role, object_uuid)`` pairs.
-            outputs: Ordered ``(role, object_uuid, facts)`` triples, observed when
-             the workspace was opened.
             legacy: ``{"key", "object_uuid", "record", "saved_by_version",
-             "issues"}`` (see :mod:`datalab_capsule.legacy`).
+             "issues"}`` and optionally ``"observed_state_id"`` (see
+             :mod:`datalab_capsule.legacy`).
             limits: Reasons why the activity is not replayable.
 
         Returns:
@@ -437,19 +442,16 @@ class Ledger:
             validate_call(call, allow_object_bindings=True)
         except CallError as exc:
             raise LedgerError(str(exc)) from exc
+        observed = legacy.get("observed_state_id")
+        if observed is not None and observed not in self._data["states"]:
+            raise LedgerError("The observed state must exist")
         activity_id = str(uuid.uuid4())
         activity = {
             "activity_id": activity_id,
             "command_id": None,
             "call": call,
             "implementation": None,
-            "outputs": [
-                {
-                    "role": role,
-                    "state_id": self._new_state(obj_uuid, facts, activity_id),
-                }
-                for role, obj_uuid, facts in outputs
-            ],
+            "outputs": [],
             "context": {},
             "limits": list(limits),
             "environment_id": None,

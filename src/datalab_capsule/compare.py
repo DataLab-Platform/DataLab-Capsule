@@ -53,7 +53,9 @@ def compare_exact(
 
     Returns:
         ``{"verdict", "rule", "observed"}`` where ``observed`` holds the mismatch
-        count and the maximum absolute and relative errors (None when undefined).
+        count, the maximum absolute and relative errors (None when the error is
+        undefined for at least one mismatch) and the number of mismatches whose
+        absolute or relative error is undefined.
     """
     import numpy as np  # pylint: disable=import-outside-toplevel
 
@@ -79,8 +81,8 @@ def compare_exact(
         }
         return {"verdict": "different", "rule": rule, "observed": observed}
     mismatches = 0
-    max_abs: float | None = None
-    max_rel: float | None = None
+    abs_errors: list[Any] = []
+    rel_errors: list[Any] = []
     for key in reference:
         cand = np.asarray(candidate[key])
         ref = np.asarray(reference[key])
@@ -92,19 +94,26 @@ def compare_exact(
             with np.errstate(all="ignore"):
                 abs_err = np.abs(cand[differ].astype(float) - ref[differ].astype(float))
                 rel_err = abs_err / np.abs(ref[differ].astype(float))
-            # NaN placed differently counts as a mismatch with no defined error.
-            finite_abs = abs_err[np.isfinite(abs_err)]
-            if finite_abs.size:
-                max_abs = max(max_abs or 0.0, float(finite_abs.max()))
-            finite_rel = rel_err[np.isfinite(rel_err)]
-            if finite_rel.size:
-                max_rel = max(max_rel or 0.0, float(finite_rel.max()))
-    if mismatches == 0:
-        max_abs, max_rel = 0.0, 0.0
+            abs_errors.append(abs_err)
+            rel_errors.append(rel_err)
+    # A maximum is given only when the error is defined (finite) for every
+    # mismatch (NaN placed differently, infinities or a zero reference leave it
+    # undefined); the number of such mismatches is reported.
+    max_abs: float | None = 0.0
+    max_rel: float | None = 0.0
+    abs_undefined = rel_undefined = 0
+    if abs_errors:
+        all_abs, all_rel = np.concatenate(abs_errors), np.concatenate(rel_errors)
+        abs_undefined = int(np.count_nonzero(~np.isfinite(all_abs)))
+        rel_undefined = int(np.count_nonzero(~np.isfinite(all_rel)))
+        max_abs = None if abs_undefined else float(all_abs.max())
+        max_rel = None if rel_undefined else float(all_rel.max())
     observed = {
         "mismatches": mismatches,
         "max_abs_error": max_abs,
         "max_rel_error": max_rel,
+        "undefined_abs_errors": abs_undefined,
+        "undefined_rel_errors": rel_undefined,
         "dtype_match": dtype_match,
         "shape_match": shape_match,
     }

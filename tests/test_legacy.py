@@ -149,14 +149,15 @@ def test_records_become_activities_with_explicit_unknowns() -> None:
         "values": {"method": "maximum", "offset": {"$float": "NaN"}},
     }
     assert legacy["issues"] == [] and legacy["saved_by_version"] == "1.3.0"
-    # The output is the object's state observed at opening, produced by the record.
-    (output,) = normalize["outputs"]
-    state = ledger.states[output["state_id"]]
-    assert (
-        state["object_uuid"] == A and state["produced_by"] == normalize["activity_id"]
-    )
-    # Analysis: input is the analysed object, result key unknown, no output.
-    assert stats["legacy"]["key"] == ANALYSIS_KEY and stats["outputs"] == []
+    # No historical result is claimed: the state observed at opening is an
+    # ordinary observed state, named separately and produced by nothing.
+    for activity in activities:
+        assert activity["outputs"] == []
+    state = ledger.states[legacy["observed_state_id"]]
+    assert state["object_uuid"] == A and state["produced_by"] is None
+    # Analysis: input is the analysed object, result key unknown, nothing observed.
+    assert stats["legacy"]["key"] == ANALYSIS_KEY
+    assert "observed_state_id" not in stats["legacy"]
     assert _inputs(stats) == [("source", A)]
     assert stats["legacy"]["issues"] == ["result_not_identified"]
     assert diff["legacy"]["issues"] == ["unavailable_input"]
@@ -168,6 +169,7 @@ def test_records_become_activities_with_explicit_unknowns() -> None:
     ]
     assert plugin["legacy"]["record"]["plugin_origin"] == {"module": "my_plugin"}
     assert "parameters" not in plugin["legacy"]
+    observed_f = garbage["legacy"].pop("observed_state_id")
     assert garbage["legacy"] == {
         "key": PROCESSING_KEY,
         "object_uuid": F,
@@ -175,13 +177,47 @@ def test_records_become_activities_with_explicit_unknowns() -> None:
         "saved_by_version": "1.3.0",
         "issues": ["record_unreadable"],
     }
-    assert garbage["call"]["inputs"] == [] and len(garbage["outputs"]) == 1
+    assert garbage["call"]["inputs"] == []
+    assert ledger.states[observed_f]["object_uuid"] == F
     assert weird["legacy"]["issues"] == [
         "missing_ancestry",
         "pattern_unknown",
         "output_not_observed",
     ]
-    assert weird["outputs"] == []
+    assert weird["legacy"]["observed_state_id"] is None
+
+
+def test_modified_old_result_is_not_attested() -> None:
+    """Data changed after the processing, record unchanged: no result is claimed."""
+    modified = [
+        LegacyObject(o.object_uuid, o.kind, o.metadata, state_facts(signal([9.0] * 4)))
+        if o.object_uuid == A
+        else o
+        for o in _workspace()
+    ]
+    ledger = Ledger()
+    (normalize, *_rest) = import_legacy(
+        ledger, modified, is_known=_known, saved_version=None, current_version=None
+    )
+    # The import cannot know: the record is the same, the observed state shows the
+    # current data, and nothing presents it as the result of the record.
+    assert normalize["legacy"]["record"]["func_name"] == "normalize"
+    assert normalize["outputs"] == []
+    observed = ledger.states[normalize["legacy"]["observed_state_id"]]
+    assert observed["fingerprint"] == state_facts(signal([9.0] * 4))["fingerprint"]
+    assert all(s["produced_by"] is None for s in ledger.states.values())
+    manifest = build_manifest(
+        ledger, {}, workspace_sha256=SHA, workspace_size=1, date_published="x"
+    )
+    validate_manifest(manifest)
+    entities = {e["@id"]: e for e in manifest["@graph"]}
+    action = entities[f"#activity-{normalize['activity_id']}"]
+    assert action["result"] == [] and action["dlc:outputs"] == []
+    state_ref = f"#state-{observed['state_id']}"
+    assert action["dlc:observedState"] == {"@id": state_ref}
+    assert "dlc:producedBy" not in entities[state_ref]
+    first = inspect_manifest(manifest)["activities"][0]
+    assert first["outputs"] == [] and first["observed_state"] == state_ref
 
 
 @pytest.mark.parametrize(
@@ -277,7 +313,7 @@ def test_legacy_and_ordinary_activities_coexist() -> None:
     ledger.validate()
     assert (
         ledger.activities[-1]["call"]["inputs"][0]["binding"]["state_id"]
-        == (activities[0]["outputs"][0]["state_id"])
+        == activities[0]["legacy"]["observed_state_id"]
     )
 
 
@@ -317,7 +353,7 @@ def test_hdf5_round_trip_and_manifest() -> None:
         {"role": "source", "position": 0, "target": None, "object_uuid": RAW}
     ]
     assert first["legacy"]["issues"] == [] and first["parameters"] == {}
-    assert (
-        first["outputs"][0]["target"]
-        == f"#state-{activities[0]['outputs'][0]['state_id']}"
+    assert first["outputs"] == []
+    assert first["observed_state"] == (
+        f"#state-{activities[0]['legacy']['observed_state_id']}"
     )
