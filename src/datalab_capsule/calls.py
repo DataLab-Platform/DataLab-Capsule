@@ -10,7 +10,8 @@ operation has no qualified contract and the call is never replayed.
 Binding kinds:
 
 - ``{"state_id": ...}``: a concrete state (used by activities);
-- ``{"object_uuids": [...]}``: an object selection (reserved);
+- ``{"object_uuids": [...]}``: objects whose state at execution time is unknown
+  (only in ``legacy_metadata`` activities, see :mod:`datalab_capsule.legacy`);
 - ``{"step": ..., "role": ...}``: the output of an upstream step (reserved).
 """
 
@@ -35,6 +36,7 @@ __all__ = [
 OPERATION_ID_PATTERN = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
 BINDING_KINDS = ("state_id", "object_uuids", "step")
 _IMPLEMENTED_BINDINGS = ("state_id",)
+_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 
 class CallError(ProvenanceError, ValueError):
@@ -83,21 +85,36 @@ def is_opaque(call: dict[str, Any]) -> bool:
     return call.get("operation") is None
 
 
-def _check_binding(binding: Any, where: str) -> None:
+def _check_binding(binding: Any, where: str, allow_objects: bool) -> None:
     if not isinstance(binding, dict) or len(binding) == 0:
         raise CallError(f"{where}: binding must be a non-empty object")
     kinds = [kind for kind in BINDING_KINDS if kind in binding]
     if len(kinds) != 1:
         raise CallError(f"{where}: binding must hold exactly one of {BINDING_KINDS}")
     kind = kinds[0]
+    if kind == "object_uuids" and allow_objects:
+        uuids = binding["object_uuids"]
+        if (
+            set(binding) != {"object_uuids"}
+            or not isinstance(uuids, list)
+            or not uuids
+            or not all(isinstance(u, str) and _UUID.match(u) for u in uuids)
+        ):
+            raise CallError(f"{where}: object binding must list object UUIDs")
+        return
     if kind not in _IMPLEMENTED_BINDINGS:
         raise ReservedBindingError(f"{where}: binding kind {kind!r} is reserved")
     if set(binding) != {"state_id"} or not isinstance(binding["state_id"], str):
         raise CallError(f"{where}: state binding must be {{'state_id': <str>}}")
 
 
-def validate_call(call: Any) -> None:
+def validate_call(call: Any, *, allow_object_bindings: bool = False) -> None:
     """Validate the structure of an operation call.
+
+    Args:
+        call: Call to validate.
+        allow_object_bindings: Accept ``object_uuids`` bindings (legacy
+         activities only).
 
     Raises:
         ReservedBindingError: If a reserved binding kind is used.
@@ -131,4 +148,4 @@ def validate_call(call: Any) -> None:
             raise CallError(f"{where}: an input holds exactly role and binding")
         if not isinstance(item["role"], str) or not item["role"]:
             raise CallError(f"{where}: role must be a non-empty string")
-        _check_binding(item["binding"], where)
+        _check_binding(item["binding"], where, allow_object_bindings)

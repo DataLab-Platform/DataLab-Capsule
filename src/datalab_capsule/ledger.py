@@ -40,8 +40,9 @@ __all__ = [
 
 LEDGER_SCHEMA = "datalab-provenance-ledger"
 LEDGER_SCHEMA_VERSION = 1
-#: Origins written today; ``recipe``, ``legacy_metadata`` and ``opaque`` are
-#: reserved and accepted when reading.
+#: Origins written by :meth:`Ledger.record_activity`; ``legacy_metadata`` is
+#: written by :meth:`Ledger.record_legacy_activity`; ``recipe`` and ``opaque``
+#: are reserved and accepted when reading.
 ORIGINS = ("ordinary", "recompute_in_place", "history_replay")
 
 
@@ -106,17 +107,26 @@ def validate_ledger(data: Any) -> None:
         if act_id in activity_ids:
             problems.append(f"{where}: duplicate activity_id")
         activity_ids.add(act_id)
+        legacy = activity["origin"] == "legacy_metadata"
         try:
-            validate_call(activity["call"])
+            validate_call(activity["call"], allow_object_bindings=legacy)
         except CallError as exc:
             problems.append(f"{where}: {exc}")
             continue
         for item in activity["call"]["inputs"]:
-            if item["binding"]["state_id"] not in states:
+            state_id = item["binding"].get("state_id")
+            if state_id is not None and state_id not in states:
                 problems.append(f"{where}: unknown input state")
-        if is_opaque(activity["call"]) and activity["implementation"] is None:
+        if legacy and not is_opaque(activity["call"]):
+            problems.append(f"{where}: a legacy activity is never qualified")
+        if (
+            is_opaque(activity["call"])
+            and activity["implementation"] is None
+            and not legacy
+        ):
             problems.append(f"{where}: an opaque call needs an implementation")
-        if activity["environment_id"] not in environments:
+        env_id = activity["environment_id"]
+        if env_id is not None and env_id not in environments:
             problems.append(f"{where}: unknown environment")
         for output in activity["outputs"]:
             state_id = output.get("state_id")
@@ -381,6 +391,74 @@ class Ledger:
             "status": "completed",
             "started_at": started_at or now,
             "finished_at": finished_at or now,
+        }
+        self._activity_index[activity_id] = len(self._data["activities"])
+        self._data["activities"].append(activity)
+        return activity
+
+    def record_legacy_activity(
+        self,
+        *,
+        inputs: Iterable[tuple[str, str]],
+        outputs: Iterable[tuple[str, str, dict[str, Any]]],
+        legacy: dict[str, Any],
+        limits: Iterable[str] = (),
+    ) -> dict[str, Any]:
+        """Append an activity rebuilt from processing metadata of an old workspace.
+
+        What the metadata does not say stays unknown: inputs are bound to objects
+        (their state at execution time is unknown), the call is opaque with no
+        parameters, and environment, edition, implementation and times are null.
+        Such an activity is never replayed.
+
+        Args:
+            inputs: Ordered ``(role, object_uuid)`` pairs.
+            outputs: Ordered ``(role, object_uuid, facts)`` triples, observed when
+             the workspace was opened.
+            legacy: ``{"key", "object_uuid", "record", "saved_by_version",
+             "issues"}`` (see :mod:`datalab_capsule.legacy`).
+            limits: Reasons why the activity is not replayable.
+
+        Returns:
+            The appended activity.
+
+        Raises:
+            LedgerError: If the activity is inconsistent.
+        """
+        call = {
+            "operation": None,
+            "parameters": None,
+            "inputs": [
+                {"role": role, "binding": {"object_uuids": [obj_uuid]}}
+                for role, obj_uuid in inputs
+            ],
+        }
+        try:
+            validate_call(call, allow_object_bindings=True)
+        except CallError as exc:
+            raise LedgerError(str(exc)) from exc
+        activity_id = str(uuid.uuid4())
+        activity = {
+            "activity_id": activity_id,
+            "command_id": None,
+            "call": call,
+            "implementation": None,
+            "outputs": [
+                {
+                    "role": role,
+                    "state_id": self._new_state(obj_uuid, facts, activity_id),
+                }
+                for role, obj_uuid, facts in outputs
+            ],
+            "context": {},
+            "limits": list(limits),
+            "environment_id": None,
+            "edition": None,
+            "origin": "legacy_metadata",
+            "status": "completed",
+            "started_at": None,
+            "finished_at": None,
+            "legacy": copy.deepcopy(legacy),
         }
         self._activity_index[activity_id] = len(self._data["activities"])
         self._data["activities"].append(activity)

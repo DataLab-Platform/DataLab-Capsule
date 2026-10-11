@@ -115,7 +115,11 @@ def _activity_entities(
         instruments.append(_ref(op_id))
     else:
         impl = activity.get("implementation") or {}
-        name = impl.get("python_name") or "unknown"
+        legacy_record = (activity.get("legacy") or {}).get("record")
+        legacy_name = (
+            legacy_record.get("func_name") if isinstance(legacy_record, dict) else None
+        )
+        name = impl.get("python_name") or legacy_name or "unknown"
         action_name = name
         impl_id = f"#implementation-{name}-{impl.get('version') or 'unknown'}"
         entity = {"@id": impl_id, "@type": "SoftwareApplication", "name": name}
@@ -126,19 +130,20 @@ def _activity_entities(
         graph.setdefault(impl_id, entity)
         instruments.append(_ref(impl_id))
     edition = activity["edition"]
-    environment = graph.get(f"#environment-{activity['environment_id']}", {})
-    version = environment.get("dlc:editionVersion", "unknown")
-    edition_id = f"#edition-{edition}-{version}"
-    graph.setdefault(
-        edition_id,
-        {
-            "@id": edition_id,
-            "@type": "SoftwareApplication",
-            "name": EDITION_NAMES.get(edition, edition),
-            "softwareVersion": version,
-        },
-    )
-    instruments.append(_ref(edition_id))
+    if edition is not None:
+        environment = graph.get(f"#environment-{activity['environment_id']}", {})
+        version = environment.get("dlc:editionVersion", "unknown")
+        edition_id = f"#edition-{edition}-{version}"
+        graph.setdefault(
+            edition_id,
+            {
+                "@id": edition_id,
+                "@type": "SoftwareApplication",
+                "name": EDITION_NAMES.get(edition, edition),
+                "softwareVersion": version,
+            },
+        )
+        instruments.append(_ref(edition_id))
 
     def bindings(items: list[dict[str, Any]], direction: str) -> list[dict[str, str]]:
         refs = []
@@ -151,8 +156,11 @@ def _activity_entities(
                 "position": position,
             }
             state_id = item.get("state_id") or item.get("binding", {}).get("state_id")
+            object_uuids = item.get("binding", {}).get("object_uuids")
             if state_id is not None:
                 entity["dlc:state"] = _ref(f"#state-{state_id}")
+            elif object_uuids is not None:
+                entity["dlc:objectUuid"] = object_uuids[0]
             else:
                 artifact_id = f"{act_id}-artifact-{position}"
                 artifact = item["artifact"]
@@ -196,7 +204,11 @@ def _activity_entities(
         ),
         "name": action_name,
         "instrument": instruments,
-        "object": [graph[ref["@id"]]["dlc:state"] for ref in inputs],
+        "object": [
+            graph[ref["@id"]]["dlc:state"]
+            for ref in inputs
+            if "dlc:state" in graph[ref["@id"]]
+        ],
         "result": [
             graph[ref["@id"]].get("dlc:state") or graph[ref["@id"]]["dlc:artifact"]
             for ref in outputs
@@ -207,9 +219,12 @@ def _activity_entities(
         "dlc:parameters": parameters,
         "dlc:replayable": operation is not None,
         "dlc:origin": activity["origin"],
-        "dlc:environment": _ref(f"#environment-{activity['environment_id']}"),
         "dlc:limits": list(activity.get("limits") or []),
     }
+    if activity["environment_id"] is not None:
+        action["dlc:environment"] = _ref(f"#environment-{activity['environment_id']}")
+    if activity.get("legacy") is not None:
+        action["dlc:legacy"] = canonical_json(activity["legacy"])
     if activity.get("command_id"):
         action["dlc:commandId"] = activity["command_id"]
     x_alignment = (activity.get("context") or {}).get("x_alignment")
@@ -465,11 +480,14 @@ def validate_manifest(manifest: Any) -> None:
 def _bound(entities: dict[str, dict[str, Any]], ref: str) -> dict[str, Any]:
     binding = entities[ref]
     target = binding.get("dlc:state") or binding.get("dlc:artifact")
-    return {
+    bound = {
         "role": binding["name"],
         "position": binding["position"],
         "target": target["@id"] if target else None,
     }
+    if "dlc:objectUuid" in binding:
+        bound["object_uuid"] = binding["dlc:objectUuid"]
+    return bound
 
 
 def inspect_manifest(manifest: Any) -> dict[str, Any]:
@@ -484,7 +502,8 @@ def inspect_manifest(manifest: Any) -> dict[str, Any]:
         inputs = [_bound(entities, r) for r in _refs(action.get("dlc:inputs"))]
         outputs = [_bound(entities, r) for r in _refs(action.get("dlc:outputs"))]
         for item in inputs:
-            consumers.setdefault(item["target"], []).append(ref)
+            if item["target"] is not None:
+                consumers.setdefault(item["target"], []).append(ref)
         tools = [entities[r] for r in _refs(action.get("instrument")) if r in entities]
         activities.append(
             {
@@ -505,6 +524,9 @@ def inspect_manifest(manifest: Any) -> dict[str, Any]:
                     json.loads(action["dlc:xAlignment"])
                     if "dlc:xAlignment" in action
                     else None
+                ),
+                "legacy": (
+                    json.loads(action["dlc:legacy"]) if "dlc:legacy" in action else None
                 ),
             }
         )

@@ -114,7 +114,7 @@
       ]
     },
     "binding": {
-      "description": "state_id binds a concrete state (activities). object_uuids (object selection) and step (output of an upstream step) are reserved and refused by readers of this version.",
+      "description": "state_id binds a concrete state. object_uuids binds objects whose state at execution time is unknown; only legacy_metadata activities use it. step (output of an upstream step) is reserved and refused by readers of this version.",
       "oneOf": [
         {
           "type": "object",
@@ -217,13 +217,38 @@
         "outputs": {"type": "array", "items": {"$ref": "#/$defs/output"}},
         "context": {"type": "object"},
         "limits": {"$ref": "#/$defs/limits"},
-        "environment_id": {"$ref": "#/$defs/digest"},
-        "edition": {"enum": ["desktop", "web"]},
+        "environment_id": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/digest"}]},
+        "edition": {"enum": ["desktop", "web", null]},
         "origin": {"enum": ["ordinary", "recompute_in_place", "history_replay", "recipe", "legacy_metadata", "opaque"]},
         "status": {"const": "completed"},
-        "started_at": {"$ref": "#/$defs/timestamp"},
-        "finished_at": {"$ref": "#/$defs/timestamp"}
-      }
+        "started_at": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/timestamp"}]},
+        "finished_at": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/timestamp"}]},
+        "legacy": {
+          "description": "legacy_metadata activities: the processing record found in the object's metadata (as stored), the version that saved the file and the issues found at import.",
+          "type": "object",
+          "required": ["key", "object_uuid", "record", "saved_by_version", "issues"],
+          "properties": {
+            "key": {"type": "string", "minLength": 1},
+            "object_uuid": {"$ref": "#/$defs/uuid"},
+            "saved_by_version": {"type": ["string", "null"]},
+            "issues": {"type": "array", "items": {"type": "string", "minLength": 1}}
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"origin": {"const": "legacy_metadata"}}},
+          "then": {"required": ["legacy"]},
+          "else": {
+            "properties": {
+              "environment_id": {"$ref": "#/$defs/digest"},
+              "edition": {"enum": ["desktop", "web"]},
+              "started_at": {"$ref": "#/$defs/timestamp"},
+              "finished_at": {"$ref": "#/$defs/timestamp"}
+            }
+          }
+        }
+      ]
     }
   }
 }
