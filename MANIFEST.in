@@ -1,0 +1,9 @@
+include CHANGELOG.md README.md LICENSE
+recursive-include doc *.md
+recursive-include examples *.py
+recursive-include benchmarks *.py
+recursive-include scripts *.py
+graft tests
+prune tests/pyodide/node_modules
+exclude tests/pyodide/package-lock.json
+global-exclude __pycache__ *.py[cod]

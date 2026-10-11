@@ -1,0 +1,134 @@
+# Build, check and publish a DataLab-Capsule release.
+#
+# Triggers:
+#   * push of a tag vX.Y.Z (no pre-release suffix): tests, build, artifact
+#     checks, PyPI publication (Trusted Publishing) and a draft GitHub release;
+#   * manual run (workflow_dispatch): dry run, the same tests, build and checks,
+#     never publishes.
+#
+# Prerequisites (one-time, off-CI): PyPI Trusted Publishing for the project
+# "DataLab-Capsule" -> this repository, workflow "release.yml", environment
+# "pypi" (with required reviewers, so that each publication is approved).
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]*.[0-9]*.[0-9]*"
+      - "!v*-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  tests:
+    uses: ./.github/workflows/tests.yml
+
+  build:
+    name: Build and check the distributions
+    needs: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+      - name: Check the distributions
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            python scripts/check_dist.py dist --version "${GITHUB_REF_NAME#v}"
+          else
+            python scripts/check_dist.py dist
+          fi
+          twine check --strict dist/*
+      - name: Check the release notes
+        if: github.ref_type == 'tag'
+        run: grep -q "^## \[${GITHUB_REF_NAME#v}\]" CHANGELOG.md
+      - name: Install and use in clean environments
+        run: |
+          wheel="$(ls dist/*.whl)"
+          python -m venv /tmp/core
+          /tmp/core/bin/pip install -q "$wheel"
+          /tmp/core/bin/python -c "import importlib.util as u, sys; found=[n for n in ('numpy','h5py','fastapi') if u.find_spec(n)]; sys.exit(f'Unexpected packages: {found}' if found else 0)"
+          for capsule in tests/fixtures/corpus/valid/*.dlcapsule; do
+            /tmp/core/bin/workspace-capsule validate "$capsule"
+          done
+          python -m venv /tmp/full
+          /tmp/full/bin/pip install -q "$wheel[hdf5,registry]"
+          /tmp/full/bin/pip check
+          /tmp/full/bin/workspace-capsule verify tests/fixtures/corpus/valid/chain-desktop.dlcapsule
+          /tmp/full/bin/workspace-capsule-registry --help > /dev/null
+      - uses: actions/upload-artifact@v6
+        with:
+          name: python-dists
+          path: dist/
+          retention-days: 30
+
+  publish-pypi:
+    name: Publish to PyPI
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/DataLab-Capsule
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: python-dists
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    name: Draft GitHub release
+    if: github.ref_type == 'tag'
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          name: python-dists
+          path: dist
+      - name: Checksums and release notes
+        run: |
+          (cd dist && sha256sum *.whl *.tar.gz) > SHA256SUMS
+          cat SHA256SUMS
+          version="${GITHUB_REF_NAME#v}"
+          awk -v head="## [$version]" '
+            index($0, head) == 1 { on = 1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' CHANGELOG.md > release-notes.md
+          test -s release-notes.md
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            dist/*.whl
+            dist/*.tar.gz
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: DataLab-Capsule ${{ github.ref_name }}
+          body_path: release-notes.md
+          draft: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+            SHA256SUMS

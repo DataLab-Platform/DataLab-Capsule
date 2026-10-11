@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,14 +7,14 @@ name = "DataLab-Capsule"
 dynamic = ["version"]
 description = "Exchange and verify scientific workspace provenance as open RO-Crate capsules (library and CLI, no DataLab required)"
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
 authors = [{ name = "DataLab Platform Developers" }]
 requires-python = ">=3.9, <4"
 dependencies = ["jsonschema >= 4.17"]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: BSD License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
