@@ -2,22 +2,32 @@
 
 """Semantic difference between two capsule manifests.
 
-Changes are sorted into four groups:
+Changes are sorted into five groups:
 
 - ``scientific``: activities (operation, parameters, inputs and outputs with
-  analysis-result digests, origin, replayability, limits, X alignment), states
-  (kind, object, fingerprint, ROI, producer) and the workspace content (SHA-256);
+  analysis-result digests, origin, replayability, limits, X alignment) and
+  states (kind, object, fingerprint, ROI, producer);
 - ``presentation``: name, description, licence and publication date of the
-  capsule, where states are stored (locators) and how the workspace is stored
-  (included or referenced);
+  capsule;
+- ``storage``: the workspace file (SHA-256, size, included or referenced,
+  address) and where states are stored (locators). Different bytes do not show
+  a scientific change: saving the same content again gives another file;
 - ``environment``: execution environments (editions, versions, platforms,
   packages) and the environment each activity ran in;
 - ``attachments``: attachments added, removed or changed (SHA-256, size, media
   type, description). Their content is not interpreted: a protocol or a
   calibration certificate may matter scientifically, so the reader judges.
 
+``scientific_conclusion`` states what the comparison can conclude, without
+claiming more than the manifests cover: ``"differences"`` (scientific changes
+found), ``"none"`` (no scientific change and the same workspace bytes) or
+``"none_detected"`` (no change in the recorded activities and states, but the
+workspace files differ: content outside the recorded provenance is not
+compared, so equality is not established).
+
 Activities and states are matched by their identifiers, which a revision keeps
 for everything it inherits. Nothing is computed; only the manifests are read.
+Fingerprints and identities are not affected.
 """
 
 from __future__ import annotations
@@ -123,16 +133,19 @@ def diff_manifests(old: Any, new: Any) -> dict[str, Any]:
         new: Later manifest.
 
     Returns:
-        ``{"old", "new", "revision_of_old", "identical", "scientific",
-        "presentation", "environment", "attachments"}``: the two manifest
+        ``{"old", "new", "revision_of_old", "identical",
+        "scientific_conclusion", "scientific", "presentation", "storage",
+        "environment", "attachments"}``: the two manifest
         fingerprints, whether *new* names *old* as its parent, whether nothing
-        differs, and the changes of each group. A change is ``{"change":
+        differs, what can be concluded scientifically, and the changes of each
+        group. A change is ``{"change":
         "added" | "removed" | "changed", "item", "id"}``, plus ``"field"``,
         ``"old"`` and ``"new"`` for a changed field.
     """
     old_summary, new_summary = inspect_manifest(old), inspect_manifest(new)
     scientific: list[dict[str, Any]] = []
     presentation: list[dict[str, Any]] = []
+    storage: list[dict[str, Any]] = []
     environment: list[dict[str, Any]] = []
     attachments: list[dict[str, Any]] = []
     _compare(
@@ -145,25 +158,14 @@ def diff_manifests(old: Any, new: Any) -> dict[str, Any]:
     old_states = _by_id(old_summary["states"])
     new_states = _by_id(new_summary["states"])
     _compare(scientific, "state", old_states, new_states, _STATE_SCIENTIFIC)
-    _compare(presentation, "state", old_states, new_states, ("locator",), False)
+    _compare(storage, "state", old_states, new_states, ("locator",), False)
     old_ws, new_ws = old_summary["workspace"], new_summary["workspace"]
-    if old_ws["sha256"] != new_ws["sha256"]:
-        scientific.append(
-            {
-                "change": "changed",
-                "item": "workspace",
-                "id": "workspace",
-                "field": "sha256",
-                "old": old_ws["sha256"],
-                "new": new_ws["sha256"],
-            }
-        )
     _compare(
-        presentation,
+        storage,
         "workspace",
         {"workspace": old_ws},
         {"workspace": new_ws},
-        ("id", "referenced"),
+        ("sha256", "size", "id", "referenced"),
     )
     _compare(
         presentation,
@@ -196,13 +198,22 @@ def diff_manifests(old: Any, new: Any) -> dict[str, Any]:
     )
     old_fp, new_fp = manifest_fingerprint(old), manifest_fingerprint(new)
     root = _entities(new)["./"]
+    if scientific:
+        conclusion = "differences"
+    elif old_ws["sha256"] == new_ws["sha256"]:
+        conclusion = "none"
+    else:
+        conclusion = "none_detected"
+    groups = (scientific, presentation, storage, environment, attachments)
     return {
         "old": old_fp,
         "new": new_fp,
         "revision_of_old": root.get(REVISION_KEY) == old_fp,
-        "identical": not (scientific or presentation or environment or attachments),
+        "identical": not any(groups),
+        "scientific_conclusion": conclusion,
         "scientific": scientific,
         "presentation": presentation,
+        "storage": storage,
         "environment": environment,
         "attachments": attachments,
     }

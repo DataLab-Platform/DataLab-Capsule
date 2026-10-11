@@ -106,6 +106,16 @@ def _print_summary(summary: dict) -> None:
         print(f"Fan-out: {', '.join(_short(s) for s in summary['fan_out'])}")
 
 
+_CONCLUSIONS = {
+    "differences": "scientific changes found",
+    "none": "no scientific change, same workspace file",
+    "none_detected": (
+        "no change in the recorded activities and states; the workspace files "
+        "differ and content outside the recorded provenance is not compared"
+    ),
+}
+
+
 def _print_diff(diff: dict) -> None:
     print(f"Old: {diff['old']}")
     print(f"New: {diff['new']}")
@@ -114,7 +124,9 @@ def _print_diff(diff: dict) -> None:
     if diff["identical"]:
         print("Identical.")
         return
-    for group in ("scientific", "presentation", "environment", "attachments"):
+    print(f"Scientific conclusion: {_CONCLUSIONS[diff['scientific_conclusion']]}")
+    groups = ("scientific", "presentation", "storage", "environment", "attachments")
+    for group in groups:
         changes = diff[group]
         label = "Attachment" if group == "attachments" else group.capitalize()
         print(f"{label} changes ({len(changes)}):")

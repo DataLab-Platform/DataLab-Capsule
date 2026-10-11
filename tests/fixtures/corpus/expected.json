@@ -215,17 +215,20 @@
       "json": {
         "identical": false,
         "revision_of_old": true,
-        "changes": { "scientific": [], "presentation": ["changed capsule description", "changed capsule name"], "environment": [] }
+        "scientific_conclusion": "none",
+        "changes": { "scientific": [], "presentation": ["changed capsule description", "changed capsule name"], "storage": [], "environment": [] }
       }
     },
     {
       "argv": ["diff", "valid/legacy.dlcapsule", "valid/legacy-revision.dlcapsule", "--json"],
       "exit": 1,
       "json": {
+        "scientific_conclusion": "differences",
         "revision_of_old": true,
         "changes": {
-          "scientific": ["added activity", "added state", "changed workspace sha256"],
+          "scientific": ["added activity", "added state"],
           "presentation": ["changed capsule description", "changed capsule name"],
+          "storage": ["changed workspace sha256", "changed workspace size"],
           "environment": ["added environment"]
         }
       }
@@ -236,8 +239,9 @@
       "json": {
         "revision_of_old": false,
         "changes": {
-          "scientific": ["changed workspace sha256", "removed activity", "removed state"],
+          "scientific": ["removed activity", "removed state"],
           "presentation": ["changed capsule description", "changed capsule name"],
+          "storage": ["changed workspace sha256", "changed workspace size"],
           "environment": ["removed environment"]
         }
       }
@@ -246,10 +250,12 @@
       "argv": ["diff", "valid/chain-desktop.dlcapsule", "valid/missing-resource.dlcapsule", "--json"],
       "exit": 1,
       "json": {
+        "scientific_conclusion": "none_detected",
         "revision_of_old": false,
         "changes": {
-          "scientific": ["changed workspace sha256"],
-          "presentation": ["changed capsule description", "changed capsule name", "changed state locator"],
+          "scientific": [],
+          "presentation": ["changed capsule description", "changed capsule name"],
+          "storage": ["changed state locator", "changed workspace sha256", "changed workspace size"],
           "environment": []
         }
       }
@@ -260,7 +266,8 @@
       "json": {
         "changes": {
           "scientific": [],
-          "presentation": ["changed capsule description", "changed capsule name", "changed workspace id", "changed workspace referenced"],
+          "presentation": ["changed capsule description", "changed capsule name"],
+          "storage": ["changed workspace id", "changed workspace referenced"],
           "environment": []
         }
       }
@@ -274,7 +281,6 @@
           "scientific": [
             "added activity", "added activity", "added activity", "added activity",
             "added state", "added state", "added state", "added state", "added state",
-            "changed workspace sha256",
             "removed activity", "removed activity", "removed activity", "removed activity",
             "removed state", "removed state", "removed state", "removed state", "removed state"
           ],

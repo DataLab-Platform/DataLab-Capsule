@@ -49,7 +49,7 @@ def _scientific_only(ledger: Ledger, record: dict, locators: dict) -> set:
     diff = diff_manifests(
         _manifest(ledger, locators), _manifest(Ledger.from_dict(record), locators)
     )
-    assert diff["presentation"] == diff["environment"] == []
+    assert diff["presentation"] == diff["environment"] == diff["storage"] == []
     return {(c["item"], c["field"]) for c in diff["scientific"]}
 
 
@@ -85,6 +85,7 @@ def test_identical_manifests() -> None:
     manifest = _manifest(ledger, locators)
     diff = diff_manifests(manifest, copy.deepcopy(manifest))
     assert diff["identical"] and not diff["revision_of_old"]
+    assert diff["scientific_conclusion"] == "none"
     assert diff["old"] == diff["new"] == manifest_fingerprint(manifest)
 
 
@@ -100,6 +101,7 @@ def test_revision_with_changed_parameter() -> None:
     )
     diff = diff_manifests(parent, child)
     assert diff["revision_of_old"] and not diff["identical"]
+    assert diff["scientific_conclusion"] == "differences"
     assert diff["scientific"] == [
         {
             "change": "changed",
@@ -114,24 +116,53 @@ def test_revision_with_changed_parameter() -> None:
 
 
 def test_presentation_and_storage_changes() -> None:
-    """Name, locators and the workspace storage are presentation, not science."""
+    """Name is presentation; locators and workspace storage are storage."""
     _data, ledger, locators = _chain()
     old = _manifest(ledger, locators)
     moved = {k: {**v, "path": v["path"] + "_moved"} for k, v in locators.items()}
     new = _manifest(ledger, moved, name="Renamed", workspace_ref=REF)
     diff = diff_manifests(old, new)
     assert diff["scientific"] == diff["environment"] == []
-    fields = {(c["item"], c["field"]) for c in diff["presentation"]}
-    assert fields == {
-        ("capsule", "name"),
+    assert {(c["item"], c["field"]) for c in diff["presentation"]} == {
+        ("capsule", "name")
+    }
+    assert {(c["item"], c["field"]) for c in diff["storage"]} == {
         ("state", "locator"),
         ("workspace", "id"),
         ("workspace", "referenced"),
     }
     unlocated = _manifest(ledger, {})
-    assert {c["field"] for c in diff_manifests(old, unlocated)["presentation"]} == {
+    assert {c["field"] for c in diff_manifests(old, unlocated)["storage"]} == {
         "locator"
     }
+
+
+def test_resaved_workspace_is_not_a_scientific_change() -> None:
+    """Saving the same content again changes the bytes, not the science.
+
+    The comparison reports the new file under storage and does not conclude
+    that the workspaces are scientifically equal: only the recorded activities
+    and states were compared. Fingerprints are those of the manifests.
+    """
+    data = CHAIN.read_bytes()
+    copy_ = io.BytesIO()
+    with h5py.File(io.BytesIO(data), "r") as source, h5py.File(copy_, "w") as target:
+        for key, value in source.attrs.items():
+            target.attrs[key] = value
+        for name in source:
+            source.copy(source[name], target, name=name)
+    resaved = copy_.getvalue()
+    assert resaved != data
+    old = read_capsule(create_from_hdf5(data, date_published=DATE)).manifest
+    new = read_capsule(create_from_hdf5(resaved, date_published=DATE)).manifest
+    assert verify_capsule(create_from_hdf5(resaved, date_published=DATE))["valid"]
+    diff = diff_manifests(old, new)
+    assert diff["scientific"] == diff["presentation"] == []
+    assert diff["environment"] == diff["attachments"] == []
+    assert {c["field"] for c in diff["storage"]} == {"sha256", "size"}
+    assert not diff["identical"]
+    assert diff["scientific_conclusion"] == "none_detected"
+    assert diff["old"] == manifest_fingerprint(old) != manifest_fingerprint(new)
 
 
 def test_roi_change_is_scientific() -> None:
