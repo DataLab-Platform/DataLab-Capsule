@@ -1,6 +1,6 @@
 # Copyright (c) DataLab Platform Developers, BSD 3-Clause license, see LICENSE file.
 
-"""``workspace-capsule`` command line: validate, inspect, compare and verify capsules.
+"""``workspace-capsule`` command line: create, check, compare, review and exchange.
 
 Usage::
 
@@ -10,33 +10,61 @@ Usage::
     workspace-capsule verify CAPSULE [--workspace FILE] [--report FILE]...
                              [--review FILE]... [--json]
     workspace-capsule attachment CAPSULE NAME OUTPUT
+    workspace-capsule workspace CAPSULE OUTPUT
+    workspace-capsule create WORKSPACE OUTPUT [--name NAME] [--description TEXT]
+                             [--revision-of CAPSULE] [--workspace-ref IRI]
+                             [--attach FILE]...
+    workspace-capsule review CAPSULE OUTPUT --reviewer NAME --statement TEXT
+                             [--verdict VERDICT] [--report FILE]...
+    workspace-capsule registry list URL [--json]
+    workspace-capsule registry publish URL CAPSULE [--review FILE]...
+                             [--token-env VARIABLE]
+    workspace-capsule registry fetch URL FINGERPRINT FOLDER
 
-``diff`` exits with 0 when the capsules are identical, 1 when they differ.
+``diff`` compares capsules or manifest files (``.json``, e.g. fetched from a
+registry) and exits with 0 when they are identical, 1 when they differ.
 ``verify`` exits with 0 when no problem is found, 1 otherwise. Errors exit with
-2 (``diff``) or 1. Nothing is ever computed or fetched: a referenced workspace
-is checked only when its file is given with ``--workspace``. ``attachment``
-writes one checked attachment to OUTPUT (never overwritten); it is not opened.
+2 (``diff``) or 1. Nothing is ever computed. Only the ``registry`` commands use
+the network, at the address given; everything they fetch is checked. A
+referenced workspace is checked only when its file is given with
+``--workspace``. ``attachment`` writes one checked attachment to OUTPUT and
+``workspace`` the checked workspace (to open in DataLab); no
+command overwrites a file or opens an attachment. ``create`` needs h5py.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import mimetypes
+import os
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
-from datalab_capsule.archive import read_capsule
+from datalab_capsule.archive import create_from_hdf5, read_capsule
 from datalab_capsule.diff import diff_manifests
 from datalab_capsule.integrity import ProvenanceError, load_json
-from datalab_capsule.manifest import inspect_manifest
+from datalab_capsule.manifest import (
+    inspect_manifest,
+    manifest_fingerprint,
+    validate_manifest,
+)
+from datalab_capsule.registry_client import RegistryClient, fetch_revision
+from datalab_capsule.review import VERDICTS, create_review
 from datalab_capsule.verify import verify_capsule
 
 __all__ = ["main"]
 
 
 def _short(ref: str | None) -> str:
-    return "-" if ref is None else ref.split("-", 1)[-1][:8]
+    if ref is None:
+        return "-"
+    if not ref.startswith("#"):
+        return ref
+    ident = ref.split("-", 1)[-1]
+    return ident[:19] if ident.startswith("sha256:") else ident[:8]
 
 
 def _print_summary(summary: dict) -> None:
@@ -149,15 +177,64 @@ def main(argv: Sequence[str] | None = None) -> int:
     attachment.add_argument("capsule")
     attachment.add_argument("name")
     attachment.add_argument("output")
+    extract = commands.add_parser(
+        "workspace", help="write the checked workspace of a capsule to a file"
+    )
+    extract.add_argument("capsule")
+    extract.add_argument("output")
+    create = commands.add_parser(
+        "create", help="create a capsule from a saved workspace (needs h5py)"
+    )
+    create.add_argument("workspace")
+    create.add_argument("output")
+    create.add_argument("--name")
+    create.add_argument("--description")
+    create.add_argument("--revision-of", help="parent capsule (file)")
+    create.add_argument("--workspace-ref", help="absolute IRI of the workspace")
+    create.add_argument("--attach", action="append", default=[], help="light file")
+    review = commands.add_parser("review", help="write a review of a capsule")
+    review.add_argument("capsule")
+    review.add_argument("output")
+    review.add_argument("--reviewer", required=True)
+    review.add_argument("--reviewer-id")
+    review.add_argument("--statement", required=True)
+    review.add_argument("--verdict", choices=VERDICTS)
+    review.add_argument("--report", action="append", default=[], help="report file")
+    registry = commands.add_parser("registry", help="use a capsule registry")
+    actions = registry.add_subparsers(dest="action", required=True)
+    listing = actions.add_parser("list", help="list the revisions")
+    listing.add_argument("url")
+    listing.add_argument("--json", action="store_true", help="JSON output")
+    publish = actions.add_parser(
+        "publish", help="publish a manifest, its attachments and reviews"
+    )
+    publish.add_argument("url")
+    publish.add_argument("capsule")
+    publish.add_argument("--review", action="append", default=[], help="review file")
+    publish.add_argument(
+        "--token-env", metavar="VARIABLE", help="variable holding the token"
+    )
+    fetch = actions.add_parser(
+        "fetch", help="fetch and check a manifest, its reviews and attachments"
+    )
+    fetch.add_argument("url")
+    fetch.add_argument("fingerprint")
+    fetch.add_argument("folder", help="new folder for the fetched files")
     args = parser.parse_args(argv)
     if args.command == "verify":
         return _verify(args)
+    if args.command in ("create", "review", "registry"):
+        try:
+            return {"create": _create, "review": _review, "registry": _registry}[
+                args.command
+            ](args)
+        except (OSError, ValueError, ProvenanceError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
     if args.command == "diff":
         try:
-            result = diff_manifests(
-                read_capsule(args.old).manifest, read_capsule(args.new).manifest
-            )
-        except (OSError, ProvenanceError) as exc:
+            result = diff_manifests(_manifest(args.old), _manifest(args.new))
+        except (OSError, ValueError, ProvenanceError) as exc:
             print(f"Invalid capsule: {exc}", file=sys.stderr)
             return 2
         if args.json:
@@ -184,6 +261,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"Cannot write {args.output}: {exc}", file=sys.stderr)
             return 1
         print(f"Wrote {args.name} to {args.output}")
+        return 0
+    if args.command == "workspace":
+        if capsule.workspace is None:
+            print(
+                f"The workspace is referenced, not included: {capsule.workspace_ref}",
+                file=sys.stderr,
+            )
+            return 1
+        try:
+            _write_new(Path(args.output), capsule.workspace)
+        except OSError as exc:
+            print(f"Cannot write {args.output}: {exc}", file=sys.stderr)
+            return 1
+        print(f"Wrote the checked workspace to {args.output}")
         return 0
     summary = inspect_manifest(capsule.manifest)
     if args.json:
@@ -212,6 +303,130 @@ def _verify(args: argparse.Namespace) -> int:
     else:
         _print_verification(result)
     return 0 if result["valid"] else 1
+
+
+def _manifest(path: str) -> Any:
+    """Manifest of a capsule, or of a manifest file (validated)."""
+    if path.lower().endswith(".json"):
+        manifest = load_json(Path(path).read_bytes())
+        validate_manifest(manifest)
+        return manifest
+    return read_capsule(path).manifest
+
+
+def _write_new(path: Path, data: bytes) -> None:
+    """Write *data* to a new file; never overwrite."""
+    with open(path, "xb") as file:
+        file.write(data)
+
+
+def _create(args: argparse.Namespace) -> int:
+    try:
+        import h5py  # noqa: F401  # pylint: disable=import-outside-toplevel,unused-import
+    except ImportError:
+        print('create needs h5py: pip install "DataLab-Capsule[hdf5]"', file=sys.stderr)
+        return 1
+    attachments = []
+    for name in args.attach:
+        path = Path(name)
+        media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        attachments.append(
+            {"name": path.name, "data": path.read_bytes(), "media_type": media_type}
+        )
+    parent = None
+    if args.revision_of:
+        parent = manifest_fingerprint(read_capsule(args.revision_of).manifest)
+    capsule = create_from_hdf5(
+        Path(args.workspace),
+        name=args.name,
+        description=args.description,
+        revision_of=parent,
+        workspace_ref=args.workspace_ref,
+        attachments=attachments,
+    )
+    _write_new(Path(args.output), capsule)
+    summary = inspect_manifest(read_capsule(capsule).manifest)
+    print(f"Wrote {args.output}: {summary['fingerprint']}")
+    print(
+        f"{len(summary['activities'])} activities, {len(summary['states'])} states, "
+        f"{len(summary['attachments'])} attachments"
+    )
+    return 0
+
+
+def _review(args: argparse.Namespace) -> int:
+    manifest = read_capsule(args.capsule).manifest
+    review = create_review(
+        manifest,
+        reviewer=args.reviewer,
+        reviewer_id=args.reviewer_id,
+        statement=args.statement,
+        verdict=args.verdict,
+        reports=[_load_json(path) for path in args.report],
+    )
+    text = json.dumps(review, indent=2, ensure_ascii=False) + "\n"
+    _write_new(Path(args.output), text.encode("utf-8"))
+    print(f"Wrote {args.output}: {review['review_fingerprint']}")
+    return 0
+
+
+def _registry(args: argparse.Namespace) -> int:
+    token = None
+    if getattr(args, "token_env", None):
+        token = os.environ.get(args.token_env)
+        if not token:
+            print(f"Environment variable {args.token_env} is empty", file=sys.stderr)
+            return 1
+    client = RegistryClient(args.url, token)
+    if args.action == "list":
+        revisions = client.list_revisions()
+        if args.json:
+            print(json.dumps(revisions, indent=2, ensure_ascii=False))
+        for revision in [] if args.json else revisions:
+            print(
+                f"{revision['fingerprint']}  {revision['name']}  "
+                f"parent: {revision['revision_of'] or '-'}  "
+                f"attachments: {len(revision['attachments'])}  "
+                f"reviews: {revision['reviews']}"
+            )
+        return 0
+    if args.action == "publish":
+        reviews = [Path(path).read_bytes() for path in args.review]
+        result = client.publish_capsule(args.capsule, reviews)
+        state = "published" if result["created"] else "already published"
+        print(
+            f"{result['fingerprint']} {state}; {result['attachments']} attachments "
+            f"and {result['reviews']} reviews sent (never the workspace)"
+        )
+        return 0
+    fetched = fetch_revision(client, args.fingerprint)
+    folder = Path(args.folder)
+    folder.mkdir()
+    text = json.dumps(fetched["manifest"], indent=2, ensure_ascii=False) + "\n"
+    _write_new(folder / "manifest.json", text.encode("utf-8"))
+    print(f"Manifest checked: {args.fingerprint}")
+    problems = 0
+    for index, entry in enumerate(fetched["reviews"], start=1):
+        review = entry["review"]
+        if entry["status"] == "valid":
+            body = json.dumps(review, indent=2, ensure_ascii=False) + "\n"
+            _write_new(folder / f"review-{index}.json", body.encode("utf-8"))
+            print(
+                f"Review {index}: valid, {review['reviewer']['name']}, "
+                f"{review['verdict'] or 'no verdict'}"
+            )
+        else:
+            problems += 1
+            print(f"Review {index}: {entry['status']}")
+    for entry in fetched["attachments"]:
+        if entry["data"] is None:
+            problems += 1
+            print(f"Attachment {entry['name']}: {entry['status']}")
+            continue
+        (folder / "attachments").mkdir(exist_ok=True)
+        _write_new(folder / "attachments" / entry["name"], entry["data"])
+        print(f"Attachment {entry['name']}: checked, saved (not opened)")
+    return 0 if problems == 0 else 1
 
 
 if __name__ == "__main__":

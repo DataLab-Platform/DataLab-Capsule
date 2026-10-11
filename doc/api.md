@@ -60,7 +60,7 @@ changes = diff_manifests(old.manifest, new.manifest)
 
 ## Command line
 
-`workspace-capsule validate | inspect | diff | verify | attachment` (see the README). `cli.main(argv)` runs it and returns the exit code.
+`workspace-capsule validate | inspect | diff | verify | attachment | workspace | create | review | registry list | registry publish | registry fetch` (see the README). `cli.main(argv)` runs it and returns the exit code.
 
 ## Registry
 
@@ -79,6 +79,8 @@ changes = diff_manifests(old.manifest, new.manifest)
 | `GET /reviews/{fingerprint}` | `get_review(fingerprint)` | The review as published. |
 
 Errors: 401 without the token for a write, 404 for an unknown revision, attachment or review (`RegistryNotFound`), 413 for an oversized body, 422 for an invalid document or fingerprint (`RegistryError`).
+
+Client (standard library): `registry_client.RegistryClient(url, token=None)` with `list_revisions()`, `get_manifest(fingerprint)`, `list_reviews(fingerprint)`, `get_attachment(fingerprint, name)` (unchecked bytes) and `publish_capsule(capsule, reviews=())` (manifest, attachments, reviews; never the workspace); `registry_client.fetch_revision(client, fingerprint)` returns the manifest checked against the fingerprint, each review with its status and each declared attachment checked against its size and SHA-256. Errors raise `RegistryClientError`.
 
 ## Schemas
 
