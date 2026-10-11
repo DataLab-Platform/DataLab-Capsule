@@ -47,6 +47,19 @@ CHAINS = Path(__file__).parent / "fixtures" / "workspaces"
 DATE = "2026-10-01T00:00:00Z"
 LICENSE = "https://spdx.org/licenses/BSD-3-Clause"
 REFERENCED_IRI = "https://example.org/datalab/corpus/referenced-workspace.h5"
+ATTACHMENTS = [
+    {
+        "name": "protocol.txt",
+        "data": b"Signals A and B acquired on two grids; A - B is the reference.\n",
+        "media_type": "text/plain",
+        "description": "Acquisition protocol",
+    },
+    {
+        "name": "notes.csv",
+        "data": b"signal,points\nA,4\nB,3\n",
+        "media_type": "text/csv",
+    },
+]
 
 
 def derive_sources() -> None:
@@ -165,6 +178,12 @@ def build() -> dict[str, bytes]:
         description="The workspace is referenced, not included.",
         workspace_ref=REFERENCED_IRI,
     )
+    out["valid/attachments.dlcapsule"] = _capsule(
+        SOURCES / "difference_desktop.h5",
+        name="Two-input differences with attachments",
+        description="Light files selected by the author, declared and checked.",
+        attachments=ATTACHMENTS,
+    )
     difference = read_capsule(out["valid/difference-desktop.dlcapsule"]).manifest
     exact = _report("difference_exact")
     for name in ("difference_exact", "difference_altered", "legacy_opaque"):
@@ -235,6 +254,16 @@ def build() -> dict[str, bytes]:
     )
     out["invalid/bad-revision.dlcapsule"] = _zip(
         [(MANIFEST_NAME, _dump(_refingerprint(bad_revision))), entries[1]]
+    )
+    attached = _entries(out["valid/attachments.dlcapsule"])
+    out["invalid/attachment-undeclared.dlcapsule"] = _zip(
+        [*attached, ("attachments/extra.txt", b"Not declared.\n")]
+    )
+    out["invalid/attachment-altered.dlcapsule"] = _zip(
+        [
+            (name, b"Edited after export.\n" if name.endswith(".txt") else data)
+            for name, data in attached
+        ]
     )
 
     # Valid archives that do not verify.

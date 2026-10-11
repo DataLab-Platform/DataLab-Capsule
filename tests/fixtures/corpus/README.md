@@ -32,6 +32,7 @@ The chains `../workspaces/desktop_chain.h5` and `../workspaces/web_chain.h5` wer
 | `chain-renamed.dlcapsule` | A revision of `chain-desktop.dlcapsule` with only a new name and description (presentation change). |
 | `missing-resource.dlcapsule` | A state without locator (deleted result). |
 | `referenced.dlcapsule` | Referenced workspace (no `workspace.h5`); its file is `sources/difference_desktop.h5`. |
+| `attachments.dlcapsule` | Two light attachments (`protocol.txt` with a description, `notes.csv`) next to the `difference_desktop` workspace (attachment changes against `difference-desktop.dlcapsule`). |
 | `report-difference-exact.json`, `report-difference-altered.json`, `report-legacy-opaque.json` | Verification reports written by DataLab Desktop (copies of the sources). |
 | `report-numeric-different.json` | A report with verdict `different` for reference `[0, 1]` and candidate `[1, 2]`. Synthetic: the values were written by hand, not computed. |
 | `review-endorsed.json`, `review-comment.json` | Reviews of `difference-desktop` and `legacy`, citing reports. |
@@ -48,6 +49,8 @@ The chains `../workspaces/desktop_chain.h5` and `../workspaces/web_chain.h5` wer
 | `compressed-entry.dlcapsule` | Deflated entries | `validate` |
 | `referenced-with-workspace.dlcapsule` | `workspace.h5` present although the workspace is referenced | `validate` |
 | `bad-revision.dlcapsule` | `dlc:revisionOf` is not a fingerprint | `validate` |
+| `attachment-undeclared.dlcapsule` | Extra `attachments/extra.txt` absent from the manifest | `validate` |
+| `attachment-altered.dlcapsule` | `attachments/protocol.txt` changed after fingerprinting | `validate` |
 | `ledger-mismatch.dlcapsule` | Valid manifest that does not describe the workspace ledger (a parameter differs) | `verify` |
 | `altered-state.dlcapsule` | A stored state changed after saving | `verify` |
 | `review-tampered.json` | Statement changed after fingerprinting | `verify --review` |

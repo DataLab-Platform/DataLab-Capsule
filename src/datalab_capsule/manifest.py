@@ -29,7 +29,7 @@ from __future__ import annotations
 import copy
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from importlib import resources
 from typing import Any
 
@@ -42,6 +42,8 @@ from datalab_capsule.integrity import (
 from datalab_capsule.ledger import Ledger, utc_timestamp
 
 __all__ = [
+    "ATTACHMENTS_DIR",
+    "ATTACHMENT_KEY",
     "MANIFEST_NAME",
     "PROCESS_RUN_CRATE",
     "PROFILE_IRI",
@@ -52,7 +54,10 @@ __all__ = [
     "TERMS_IRI",
     "WORKSPACE_NAME",
     "ManifestError",
+    "attachment_entities",
+    "attachment_name",
     "build_manifest",
+    "check_attachment_name",
     "inspect_manifest",
     "load_ro_crate_context",
     "manifest_fingerprint",
@@ -62,6 +67,12 @@ __all__ = [
 
 MANIFEST_NAME = "ro-crate-metadata.json"
 WORKSPACE_NAME = "workspace.h5"
+#: Archive folder of the light attachments selected by the author.
+ATTACHMENTS_DIR = "attachments/"
+#: Marks a ``File`` of the root as an attachment (not the workspace).
+ATTACHMENT_KEY = "dlc:attachment"
+_ATTACHMENT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
+_HEX_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 RO_CRATE = "https://w3id.org/ro/crate/1.3"
 RO_CRATE_CONTEXT = "https://w3id.org/ro/crate/1.3/context"
 PROCESS_RUN_CRATE = "https://w3id.org/ro/wfrun/process/0.6"
@@ -87,10 +98,37 @@ def workspace_entity(manifest: Mapping[str, Any]) -> dict[str, Any]:
     """
     entities = _entities(manifest)
     parts = [entities.get(ref) for ref in _refs(entities.get("./", {}).get("hasPart"))]
-    files = [p for p in parts if p is not None and p.get("@type") == "File"]
+    files = [
+        p
+        for p in parts
+        if p is not None and p.get("@type") == "File" and not p.get(ATTACHMENT_KEY)
+    ]
     if len(files) != 1:
         raise ManifestError("The root data entity must contain one workspace File")
     return files[0]
+
+
+def attachment_entities(manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Return the attachment ``File`` entities of the root, in declared order."""
+    entities = _entities(manifest)
+    parts = [entities.get(ref) for ref in _refs(entities.get("./", {}).get("hasPart"))]
+    return [p for p in parts if p is not None and p.get(ATTACHMENT_KEY)]
+
+
+def attachment_name(entity: Mapping[str, Any]) -> str:
+    """Return the file name of an attachment entity (its archive entry name)."""
+    return entity["@id"][len(ATTACHMENTS_DIR) :]
+
+
+def check_attachment_name(name: Any) -> None:
+    """Refuse an attachment name that is not a plain, safe file name.
+
+    Raises:
+        ManifestError: If *name* has a path, a leading dot or another character
+         than letters, digits, ``.``, ``_`` and ``-`` (100 characters at most).
+    """
+    if not isinstance(name, str) or not _ATTACHMENT_NAME.match(name):
+        raise ManifestError(f"Invalid attachment name: {name!r}")
 
 
 EDITION_NAMES = {"desktop": "DataLab", "web": "DataLab-Web"}
@@ -273,6 +311,32 @@ def _activity_entities(
     return action
 
 
+def _attachment_file(item: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the ``File`` entity declaring one attachment."""
+    check_attachment_name(item.get("name"))
+    size, digest = item.get("size"), str(item.get("sha256"))
+    if not isinstance(size, int) or isinstance(size, bool) or size < 0:
+        raise ManifestError(f"Invalid attachment size: {size!r}")
+    hex_digest = digest.split(":", 1)[1] if digest.startswith("sha256:") else ""
+    if not _HEX_DIGEST.match(hex_digest):
+        raise ManifestError(f"Invalid attachment digest: {digest!r}")
+    media_type = item.get("media_type")
+    if not isinstance(media_type, str) or "/" not in media_type:
+        raise ManifestError(f"Invalid attachment media type: {media_type!r}")
+    entity = {
+        "@id": ATTACHMENTS_DIR + item["name"],
+        "@type": "File",
+        "name": item["name"],
+        "encodingFormat": media_type,
+        "contentSize": str(size),
+        "sha256": hex_digest,
+        ATTACHMENT_KEY: True,
+    }
+    if item.get("description"):
+        entity["description"] = str(item["description"])
+    return entity
+
+
 def build_manifest(
     ledger: Ledger,
     locators: Mapping[str, Mapping[str, str]],
@@ -285,6 +349,7 @@ def build_manifest(
     date_published: str | None = None,
     revision_of: str | None = None,
     workspace_ref: str | None = None,
+    attachments: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Build the RO-Crate manifest of a capsule from a workspace's ledger.
 
@@ -301,13 +366,16 @@ def build_manifest(
         revision_of: Manifest fingerprint of the parent revision, if any.
         workspace_ref: Absolute IRI of the workspace when it is referenced
          instead of included as ``workspace.h5``; it is never resolved here.
+        attachments: Light files selected by the author, in order:
+         ``{"name", "size", "sha256", "media_type", "description"}``
+         (``description`` optional). They are declared, never interpreted.
 
     Returns:
         The manifest, with its fingerprint.
 
     Raises:
-        ManifestError: If *revision_of* is not a manifest fingerprint or
-         *workspace_ref* is not an absolute IRI.
+        ManifestError: If *revision_of* is not a manifest fingerprint,
+         *workspace_ref* is not an absolute IRI or an attachment is invalid.
     """
     if revision_of is not None and not _DIGEST.match(str(revision_of)):
         raise ManifestError(f"Invalid parent revision: {revision_of!r}")
@@ -315,6 +383,10 @@ def build_manifest(
         raise ManifestError(
             f"A referenced workspace needs an absolute IRI: {workspace_ref!r}"
         )
+    attachment_files = [_attachment_file(item) for item in attachments]
+    names = [entity["@id"] for entity in attachment_files]
+    if len(set(names)) != len(names):
+        raise ManifestError("Attachment names must be unique")
     workspace_id = WORKSPACE_NAME if workspace_ref is None else workspace_ref
     graph: dict[str, dict[str, Any]] = {}
     for env_id, env in ledger.environments.items():
@@ -380,6 +452,8 @@ def build_manifest(
         "mentions": [_ref(a["@id"]) for a in actions],
         "dlc:workspaceId": ledger.workspace_id,
     }
+    if attachment_files:
+        root["hasPart"] += [_ref(entity["@id"]) for entity in attachment_files]
     if revision_of is not None:
         root[REVISION_KEY] = revision_of
     head = [
@@ -411,6 +485,7 @@ def build_manifest(
             "sha256": workspace_sha256.split(":", 1)[-1],
             **({"dlc:referenced": True} if workspace_ref is not None else {}),
         },
+        *attachment_files,
     ]
     manifest = {
         "@context": [RO_CRATE_CONTEXT, {"dlc": TERMS_IRI}],
@@ -448,7 +523,11 @@ def _refs(value: Any) -> list[str]:
 
 
 def _is_local(ref: str) -> bool:
-    return ref.startswith("#") or ref in ("./", WORKSPACE_NAME, MANIFEST_NAME)
+    return (
+        ref.startswith("#")
+        or ref.startswith(ATTACHMENTS_DIR)
+        or ref in ("./", WORKSPACE_NAME, MANIFEST_NAME)
+    )
 
 
 def validate_manifest(manifest: Any) -> None:
@@ -493,6 +572,23 @@ def validate_manifest(manifest: Any) -> None:
         )
     if workspace.get(REFERENCED_KEY) and not _ABSOLUTE_IRI.match(workspace["@id"]):
         problems.append("A referenced workspace needs an absolute IRI")
+    for entity in attachment_entities(manifest):
+        try:
+            _attachment_file(
+                {
+                    "name": entity["@id"][len(ATTACHMENTS_DIR) :]
+                    if entity["@id"].startswith(ATTACHMENTS_DIR)
+                    else None,
+                    "size": int(entity.get("contentSize", "-1")),
+                    "sha256": "sha256:" + str(entity.get("sha256")),
+                    "media_type": entity.get("encodingFormat"),
+                    "description": entity.get("description"),
+                }
+            )
+        except (ManifestError, TypeError, ValueError) as exc:
+            problems.append(f"{entity['@id']}: {exc}")
+        if entity.get("@type") != "File" or entity.get(ATTACHMENT_KEY) is not True:
+            problems.append(f"{entity['@id']}: an attachment is a File marked true")
     try:
         defined = set(load_ro_crate_context()["@context"])
     except (OSError, KeyError, ValueError) as exc:  # pragma: no cover
@@ -650,6 +746,16 @@ def inspect_manifest(manifest: Any) -> dict[str, Any]:
             "sha256": workspace.get("sha256"),
             "size": workspace.get("contentSize"),
         },
+        "attachments": [
+            {
+                "name": entity.get("name"),
+                "media_type": entity.get("encodingFormat"),
+                "size": entity.get("contentSize"),
+                "sha256": entity.get("sha256"),
+                "description": entity.get("description"),
+            }
+            for entity in attachment_entities(manifest)
+        ],
         "activities": activities,
         "states": states,
         "fan_out": sorted(s["id"] for s in states if len(s["consumed_by"]) > 1),

@@ -9,11 +9,13 @@ Usage::
     workspace-capsule diff OLD NEW [--json]
     workspace-capsule verify CAPSULE [--workspace FILE] [--report FILE]...
                              [--review FILE]... [--json]
+    workspace-capsule attachment CAPSULE NAME OUTPUT
 
 ``diff`` exits with 0 when the capsules are identical, 1 when they differ.
 ``verify`` exits with 0 when no problem is found, 1 otherwise. Errors exit with
 2 (``diff``) or 1. Nothing is ever computed or fetched: a referenced workspace
-is checked only when its file is given with ``--workspace``.
+is checked only when its file is given with ``--workspace``. ``attachment``
+writes one checked attachment to OUTPUT (never overwritten); it is not opened.
 """
 
 from __future__ import annotations
@@ -48,6 +50,11 @@ def _print_summary(summary: dict) -> None:
     print(
         f"Workspace ({where}): {workspace['size']} bytes, sha256 {workspace['sha256']}"
     )
+    for item in summary["attachments"]:
+        print(
+            f"Attachment {item['name']} ({item['media_type']}, "
+            f"{item['size']} bytes): {item['description'] or '-'}"
+        )
     print(f"Activities ({len(summary['activities'])}):")
     for index, act in enumerate(summary["activities"], 1):
         status = "replayable" if act["replayable"] else "opaque"
@@ -79,11 +86,15 @@ def _print_diff(diff: dict) -> None:
     if diff["identical"]:
         print("Identical.")
         return
-    for group in ("scientific", "presentation", "environment"):
+    for group in ("scientific", "presentation", "environment", "attachments"):
         changes = diff[group]
-        print(f"{group.capitalize()} changes ({len(changes)}):")
+        label = "Attachment" if group == "attachments" else group.capitalize()
+        print(f"{label} changes ({len(changes)}):")
         for change in changes:
-            line = f"  {change['change']} {change['item']} {_short(change['id'])}"
+            ident = change["id"]
+            if change["item"] != "attachment":
+                ident = _short(ident)
+            line = f"  {change['change']} {change['item']} {ident}"
             if "field" in change:
                 line += f" {change['field']}: {change['old']!r} -> {change['new']!r}"
             print(line)
@@ -132,6 +143,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     verify.add_argument("--report", action="append", default=[], help="report file")
     verify.add_argument("--review", action="append", default=[], help="review file")
     verify.add_argument("--json", action="store_true", help="JSON output")
+    attachment = commands.add_parser(
+        "attachment", help="write one attachment to a file (never opened)"
+    )
+    attachment.add_argument("capsule")
+    attachment.add_argument("name")
+    attachment.add_argument("output")
     args = parser.parse_args(argv)
     if args.command == "verify":
         return _verify(args)
@@ -155,6 +172,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     if args.command == "validate":
         print(f"Valid capsule: {args.capsule}")
+        return 0
+    if args.command == "attachment":
+        if args.name not in capsule.attachments:
+            print(f"No attachment named {args.name!r}", file=sys.stderr)
+            return 1
+        try:
+            with open(args.output, "xb") as file:
+                file.write(capsule.attachments[args.name])
+        except OSError as exc:
+            print(f"Cannot write {args.output}: {exc}", file=sys.stderr)
+            return 1
+        print(f"Wrote {args.name} to {args.output}")
         return 0
     summary = inspect_manifest(capsule.manifest)
     if args.json:

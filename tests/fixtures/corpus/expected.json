@@ -22,6 +22,31 @@
     { "argv": ["validate", "invalid/compressed-entry.dlcapsule"], "exit": 1 },
     { "argv": ["validate", "invalid/referenced-with-workspace.dlcapsule"], "exit": 1 },
     { "argv": ["validate", "invalid/bad-revision.dlcapsule"], "exit": 1 },
+    { "argv": ["validate", "valid/attachments.dlcapsule"], "exit": 0 },
+    { "argv": ["validate", "invalid/attachment-undeclared.dlcapsule"], "exit": 1 },
+    { "argv": ["validate", "invalid/attachment-altered.dlcapsule"], "exit": 1 },
+    {
+      "argv": ["inspect", "valid/attachments.dlcapsule", "--json"],
+      "exit": 0,
+      "json": { "activities": 2, "states": 4, "attachments": 2 }
+    },
+    {
+      "argv": ["verify", "valid/attachments.dlcapsule", "--json"],
+      "exit": 0,
+      "json": { "valid": true, "workspace": "verified", "states_located": 4, "states_altered": 0, "problems": 0 }
+    },
+    {
+      "argv": ["diff", "valid/difference-desktop.dlcapsule", "valid/attachments.dlcapsule", "--json"],
+      "exit": 1,
+      "json": {
+        "changes": {
+          "scientific": [],
+          "presentation": ["changed capsule description", "changed capsule name"],
+          "environment": [],
+          "attachments": ["added attachment", "added attachment"]
+        }
+      }
+    },
 
     {
       "argv": ["inspect", "valid/chain-desktop.dlcapsule", "--json"],

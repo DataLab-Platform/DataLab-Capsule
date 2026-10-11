@@ -14,7 +14,8 @@ Status: experimental, under development. Nothing is published yet.
 - Capsules (`.dlcapsule`): a ZIP archive holding `workspace.h5` and an RO-Crate 1.3 manifest (`ro-crate-metadata.json`) that conforms to Process Run Crate 0.6 and to the experimental [DataLab capsule profile 0.1](https://datalab-platform.com/capsule/0.1) (terms: `https://datalab-platform.com/capsule/terms#`). The reader refuses unsafe archives (path traversal, duplicates, links, encryption, compressed entries, size limits) and never accesses the network. It holds the whole archive in memory: it checks the archive size before reading it, then the size of each entry. Each edition passes its own `SizePolicy`; the default one (4 GiB workspace) is an accepted upper bound, not a tested capacity.
 - Revisions and reviews: a capsule may name one parent revision by its manifest fingerprint (`dlc:revisionOf`), which is part of its own fingerprint. A review is a separate JSON document (`review-1` schema) that targets one revision by fingerprint, states who reviewed it and what was found (`endorsed`, `disputed` or `comment`), may cite verification reports by fingerprint, and has its own fingerprint. A review never modifies the capsule.
 - Referenced workspaces: a capsule may reference its workspace by an absolute IRI instead of including `workspace.h5` (`dlc:referenced`). The library never fetches it: the caller passes an explicit resolver, and the bytes obtained must match the SHA-256 and size recorded in the manifest.
-- Semantic diff (`diff_manifests`): changes between two capsules are sorted into scientific (activities, parameters, states, fingerprints, ROI, workspace content), presentation (name, description, licence, date, locators, workspace storage) and environment (environments, packages, the environment of each activity).
+- Light attachments: up to 8 files of at most 16 MiB each, chosen by the author (protocol, notes, small tables...), stored under `attachments/` and declared in the manifest (`dlc:attachment`) with their media type, size and SHA-256. They are part of the manifest fingerprint. The reader refuses undeclared, missing or altered attachments. They are returned as bytes, written to disk only on explicit request, and never opened or executed.
+- Semantic diff (`diff_manifests`): changes between two capsules are sorted into scientific (activities, parameters, states, fingerprints, ROI, workspace content), presentation (name, description, licence, date, locators, workspace storage), environment (environments, packages, the environment of each activity) and attachments (added, removed or changed; their content is not interpreted, since a protocol or a calibration certificate may matter scientifically).
 - Verification without computation (`verify_capsule`): the archive and manifest, the workspace integrity, the match between the manifest and the workspace ledger, the fingerprints and ROI of every stored state (with h5py), and supplied verification reports and reviews. Recomputing an activity is the replay of an edition, never this package's job.
 - Pure Python for CPython 3.9+ and Pyodide (Python 3.12). The core only needs the standard library and `jsonschema`; HDF5 helpers use NumPy and h5py.
 - The package never imports DataLab, Sigima, SigimaX or Qt, and never executes code named in a file.
@@ -30,6 +31,12 @@ workspace-capsule diff old.dlcapsule new.dlcapsule [--json]
 ```
 
 `diff` exits with 0 when the capsules are identical and 1 when they differ.
+
+Writing one attachment to a new file (an existing file is never overwritten, and the attachment is never opened):
+
+```powershell
+workspace-capsule attachment workspace.dlcapsule protocol.txt protocol.txt
+```
 
 Verifying a capsule reads the stored states with h5py; without h5py, it checks only the workspace SHA-256 and size and says so (`integrity_only`). A referenced workspace is checked only when its file is given; reports and reviews are optional:
 

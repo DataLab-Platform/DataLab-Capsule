@@ -30,17 +30,21 @@ import json
 import os
 import stat
 import zipfile
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from datalab_capsule.hdf5 import ProvenanceFormatError, read_block
 from datalab_capsule.integrity import ProvenanceError, load_json, sha256_digest
 from datalab_capsule.manifest import (
+    ATTACHMENTS_DIR,
     MANIFEST_NAME,
     REFERENCED_KEY,
     WORKSPACE_NAME,
     ManifestError,
+    attachment_entities,
+    attachment_name,
     build_manifest,
+    check_attachment_name,
     validate_manifest,
     workspace_entity,
 )
@@ -49,6 +53,8 @@ __all__ = [
     "CAPSULE_SUFFIX",
     "DEFAULT_SIZE_POLICY",
     "MAX_ARCHIVE_BYTES",
+    "MAX_ATTACHMENTS",
+    "MAX_ATTACHMENT_BYTES",
     "MAX_ENTRIES",
     "MAX_MANIFEST_BYTES",
     "MAX_WORKSPACE_BYTES",
@@ -66,8 +72,17 @@ MAX_ENTRIES = 16
 MAX_MANIFEST_BYTES = 64 * 1024 * 1024
 #: Largest workspace accepted by default (bytes, uncompressed).
 MAX_WORKSPACE_BYTES = 4 * 1024**3
-#: Largest archive accepted by default (bytes): both entries plus ZIP headers.
-MAX_ARCHIVE_BYTES = MAX_MANIFEST_BYTES + MAX_WORKSPACE_BYTES + 1024 * 1024
+#: Largest number of light attachments in a capsule.
+MAX_ATTACHMENTS = 8
+#: Largest attachment accepted by default (bytes): attachments are light files.
+MAX_ATTACHMENT_BYTES = 16 * 1024 * 1024
+#: Largest archive accepted by default (bytes): every entry plus ZIP headers.
+MAX_ARCHIVE_BYTES = (
+    MAX_MANIFEST_BYTES
+    + MAX_WORKSPACE_BYTES
+    + MAX_ATTACHMENTS * MAX_ATTACHMENT_BYTES
+    + 1024 * 1024
+)
 _ENTRY_NAMES = (MANIFEST_NAME, WORKSPACE_NAME)
 
 
@@ -83,16 +98,20 @@ class SizePolicy:
         max_archive_bytes: Largest archive, checked before it is read.
         max_manifest_bytes: Largest manifest (uncompressed).
         max_workspace_bytes: Largest workspace (uncompressed).
+        max_attachment_bytes: Largest attachment (uncompressed).
     """
 
     max_archive_bytes: int
     max_manifest_bytes: int
     max_workspace_bytes: int
+    max_attachment_bytes: int = MAX_ATTACHMENT_BYTES
 
     def entry_limit(self, name: str) -> int:
         """Return the size limit of entry *name*."""
         if name == MANIFEST_NAME:
             return self.max_manifest_bytes
+        if name.startswith(ATTACHMENTS_DIR):
+            return self.max_attachment_bytes
         return self.max_workspace_bytes
 
 
@@ -113,11 +132,15 @@ class Capsule:
         workspace: Bytes of the workspace, to pass to the editions' open path, or
          None when it is referenced and no resolver was given.
         workspace_ref: IRI of a referenced workspace, or None when included.
+        attachments: ``name -> bytes`` of the declared attachments, checked
+         against the manifest. They are data for the user: nothing in this
+         package opens, imports or runs them.
     """
 
     manifest: dict[str, Any]
     workspace: bytes | None
     workspace_ref: str | None = None
+    attachments: dict[str, bytes] = dataclasses.field(default_factory=dict)
 
 
 def _read_source(source: str | os.PathLike | bytes, limit: int | None = None) -> bytes:
@@ -147,6 +170,7 @@ def create_from_hdf5(
     date_published: str | None = None,
     revision_of: str | None = None,
     workspace_ref: str | None = None,
+    attachments: Sequence[Mapping[str, Any]] = (),
 ) -> bytes:
     """Create a capsule from a workspace file holding a provenance block.
 
@@ -160,14 +184,39 @@ def create_from_hdf5(
         workspace_ref: Absolute IRI where the workspace will be published. When
          given, the workspace is referenced, not included: the archive holds
          the manifest only, with the workspace's SHA-256 and size.
+        attachments: Light files selected by the author, stored as
+         ``attachments/<name>`` and declared in the manifest with their size and
+         SHA-256: ``{"name", "data", "media_type", "description"}``
+         (``description`` optional).
 
     Returns:
         The capsule bytes.
 
     Raises:
-        CapsuleError: If the workspace has no (valid) provenance block.
+        CapsuleError: If the workspace has no (valid) provenance block, or the
+         attachments are too many or too large.
+        ManifestError: If a manifest field is invalid (parent revision,
+         workspace IRI, attachment name, media type).
     """
     import h5py  # pylint: disable=import-outside-toplevel
+
+    if len(attachments) > MAX_ATTACHMENTS:
+        raise CapsuleError(f"Too many attachments (at most {MAX_ATTACHMENTS})")
+    declared = []
+    for item in attachments:
+        data = bytes(item["data"])
+        if len(data) > MAX_ATTACHMENT_BYTES:
+            raise CapsuleError(f"Attachment too large: {item['name']!r}")
+        declared.append(
+            {
+                "name": item["name"],
+                "size": len(data),
+                "sha256": sha256_digest(data),
+                "media_type": item.get("media_type") or "application/octet-stream",
+                "description": item.get("description"),
+                "data": data,
+            }
+        )
 
     workspace = _read_source(source)
     try:
@@ -195,11 +244,13 @@ def create_from_hdf5(
         locators,
         workspace_sha256=sha256_digest(workspace),
         workspace_size=len(workspace),
+        attachments=declared,
         **options,
     )
     entries = [(MANIFEST_NAME, json.dumps(manifest, ensure_ascii=False, indent=1))]
     if workspace_ref is None:
         entries.append((WORKSPACE_NAME, workspace))
+    entries.extend((ATTACHMENTS_DIR + item["name"], item["data"]) for item in declared)
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_STORED) as archive:
         for entry, data in entries:
@@ -225,7 +276,12 @@ def _check_entry(info: zipfile.ZipInfo, seen: set[str], policy: SizePolicy) -> N
     if name in seen:
         raise CapsuleError(f"Duplicate entry: {name}")
     seen.add(name)
-    if name not in _ENTRY_NAMES:
+    if name.startswith(ATTACHMENTS_DIR):
+        try:
+            check_attachment_name(name[len(ATTACHMENTS_DIR) :])
+        except ManifestError as exc:
+            raise CapsuleError(f"Unsafe entry name: {name!r}") from exc
+    elif name not in _ENTRY_NAMES:
         raise CapsuleError(f"Unexpected entry: {name}")
     if info.flag_bits & 0x1:
         raise CapsuleError(f"Encrypted entry: {name}")
@@ -293,22 +349,58 @@ def read_capsule(
     except (UnicodeDecodeError, ValueError) as exc:
         raise ManifestError(f"Invalid manifest JSON: {exc}") from exc
     validate_manifest(manifest)
+    attachments = _checked_attachments(manifest, contents)
     entity = workspace_entity(manifest)
     if not entity.get(REFERENCED_KEY):
         if WORKSPACE_NAME not in contents:
             raise CapsuleError(f"Missing entries: {WORKSPACE_NAME}")
-        return Capsule(manifest, _checked(entity, contents[WORKSPACE_NAME]))
+        return Capsule(
+            manifest,
+            _checked(entity, contents[WORKSPACE_NAME]),
+            attachments=attachments,
+        )
     if WORKSPACE_NAME in contents:
         raise CapsuleError(
             f"Unexpected entry for a referenced workspace: {WORKSPACE_NAME}"
         )
     ref = entity["@id"]
     if resolve_workspace is None:
-        return Capsule(manifest, None, ref)
+        return Capsule(manifest, None, ref, attachments)
     workspace = resolve_workspace(ref)
     if len(workspace) > policy.max_workspace_bytes:
         raise CapsuleError(f"Referenced workspace too large: {ref}")
-    return Capsule(manifest, _checked(entity, bytes(workspace)), ref)
+    return Capsule(manifest, _checked(entity, bytes(workspace)), ref, attachments)
+
+
+def _checked_attachments(
+    manifest: dict[str, Any], contents: Mapping[str, bytes]
+) -> dict[str, bytes]:
+    """Return the declared attachments, each matching its size and SHA-256.
+
+    Raises:
+        CapsuleError: If an attachment is missing, undeclared or altered.
+    """
+    declared = {entity["@id"]: entity for entity in attachment_entities(manifest)}
+    if len(declared) > MAX_ATTACHMENTS:
+        raise CapsuleError(f"Too many attachments (at most {MAX_ATTACHMENTS})")
+    present = {name for name in contents if name.startswith(ATTACHMENTS_DIR)}
+    if present - set(declared):
+        raise CapsuleError(
+            f"Undeclared attachments: {', '.join(sorted(present - set(declared)))}"
+        )
+    if set(declared) - present:
+        raise CapsuleError(
+            f"Missing attachments: {', '.join(sorted(set(declared) - present))}"
+        )
+    result = {}
+    for entry, entity in declared.items():
+        data = contents[entry]
+        if entity["sha256"] != sha256_digest(data).split(":", 1)[1] or entity[
+            "contentSize"
+        ] != str(len(data)):
+            raise CapsuleError(f"The attachment does not match the manifest: {entry}")
+        result[attachment_name(entity)] = data
+    return result
 
 
 def _checked(entity: dict[str, Any], workspace: bytes) -> bytes:

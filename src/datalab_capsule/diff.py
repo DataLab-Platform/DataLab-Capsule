@@ -2,7 +2,7 @@
 
 """Semantic difference between two capsule manifests.
 
-Changes are sorted into three groups:
+Changes are sorted into four groups:
 
 - ``scientific``: activities (operation, parameters, inputs and outputs with
   analysis-result digests, origin, replayability, limits, X alignment), states
@@ -11,7 +11,10 @@ Changes are sorted into three groups:
   capsule, where states are stored (locators) and how the workspace is stored
   (included or referenced);
 - ``environment``: execution environments (editions, versions, platforms,
-  packages) and the environment each activity ran in.
+  packages) and the environment each activity ran in;
+- ``attachments``: attachments added, removed or changed (SHA-256, size, media
+  type, description). Their content is not interpreted: a protocol or a
+  calibration certificate may matter scientifically, so the reader judges.
 
 Activities and states are matched by their identifiers, which a revision keeps
 for everything it inherits. Nothing is computed; only the manifests are read.
@@ -121,16 +124,17 @@ def diff_manifests(old: Any, new: Any) -> dict[str, Any]:
 
     Returns:
         ``{"old", "new", "revision_of_old", "identical", "scientific",
-        "presentation", "environment"}``: the two manifest fingerprints, whether
-        *new* names *old* as its parent, whether nothing differs, and the
-        changes of each group. A change is ``{"change": "added" | "removed" |
-        "changed", "item", "id"}``, plus ``"field"``, ``"old"`` and ``"new"`` for
-        a changed field.
+        "presentation", "environment", "attachments"}``: the two manifest
+        fingerprints, whether *new* names *old* as its parent, whether nothing
+        differs, and the changes of each group. A change is ``{"change":
+        "added" | "removed" | "changed", "item", "id"}``, plus ``"field"``,
+        ``"old"`` and ``"new"`` for a changed field.
     """
     old_summary, new_summary = inspect_manifest(old), inspect_manifest(new)
     scientific: list[dict[str, Any]] = []
     presentation: list[dict[str, Any]] = []
     environment: list[dict[str, Any]] = []
+    attachments: list[dict[str, Any]] = []
     _compare(
         scientific,
         "activity",
@@ -169,6 +173,13 @@ def diff_manifests(old: Any, new: Any) -> dict[str, Any]:
         _ROOT_FIELDS,
     )
     _compare(
+        attachments,
+        "attachment",
+        {a["name"]: a for a in old_summary["attachments"]},
+        {a["name"]: a for a in new_summary["attachments"]},
+        ("sha256", "size", "media_type", "description"),
+    )
+    _compare(
         environment,
         "environment",
         _environments(old),
@@ -189,8 +200,9 @@ def diff_manifests(old: Any, new: Any) -> dict[str, Any]:
         "old": old_fp,
         "new": new_fp,
         "revision_of_old": root.get(REVISION_KEY) == old_fp,
-        "identical": not (scientific or presentation or environment),
+        "identical": not (scientific or presentation or environment or attachments),
         "scientific": scientific,
         "presentation": presentation,
         "environment": environment,
+        "attachments": attachments,
     }

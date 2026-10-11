@@ -16,6 +16,7 @@ This page states the rules that DataLab-Capsule implements for profile 0.1 (expe
 | Capsule revision | manifest fingerprint (`dlc:manifestFingerprint`) | Same fingerprint. Any change, including a name or a date, gives another revision. |
 | Parent revision | `dlc:revisionOf` | At most one parent, named by its manifest fingerprint, which is part of the child's fingerprint. |
 | Review | `review_fingerprint` | Same fingerprint. A review targets one revision by manifest fingerprint and never changes the capsule. |
+| Attachment | name under `attachments/` + SHA-256 | Same name and same SHA-256. Attachments are declared in the manifest, so adding, removing or changing one gives another revision; `diff` lists it in its own `attachments` group, without interpreting the content: no activity uses an attachment, but a protocol or a calibration certificate may matter scientifically, and the reader judges. |
 
 A state is **located** in a workspace when the saved object with the same UUID has the same kind, fingerprint and ROI as the state; the locator (`dlc:locator`) is its HDF5 path. A located state whose saved data or ROI no longer match is **altered**. A state without locator is **unavailable** (the object was deleted, changed before saving, or never saved).
 

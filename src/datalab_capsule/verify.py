@@ -30,6 +30,7 @@ from datalab_capsule.manifest import (
     REVISION_KEY,
     _entities,
     build_manifest,
+    inspect_manifest,
     manifest_fingerprint,
     workspace_entity,
 )
@@ -65,6 +66,10 @@ def _workspace_checks(manifest: Mapping[str, Any], workspace: bytes) -> dict[str
         date_published=root["datePublished"],
         revision_of=root.get(REVISION_KEY),
         workspace_ref=entity["@id"] if entity.get(REFERENCED_KEY) else None,
+        attachments=[
+            {**item, "size": int(item["size"]), "sha256": "sha256:" + item["sha256"]}
+            for item in inspect_manifest(manifest)["attachments"]
+        ],
     )
     if manifest_fingerprint(rebuilt) != manifest_fingerprint(manifest):
         problems.append("The manifest does not describe the workspace ledger")
