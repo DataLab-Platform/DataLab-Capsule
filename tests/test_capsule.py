@@ -16,9 +16,11 @@ import pytest
 
 from datalab_capsule import archive as archive_module
 from datalab_capsule.archive import CapsuleError, create_from_hdf5, read_capsule
+from datalab_capsule.calls import make_call
 from datalab_capsule.cli import main
+from datalab_capsule.environment import collect_environment
 from datalab_capsule.hdf5 import save_ledger
-from datalab_capsule.integrity import signal_state_facts, state_facts
+from datalab_capsule.integrity import signal_state_facts, state_facts, value_digest
 from datalab_capsule.ledger import Ledger
 from datalab_capsule.manifest import (
     MANIFEST_NAME,
@@ -197,6 +199,29 @@ def test_states_show_kind_and_roi() -> None:
     states = {s["kind"]: s for s in inspect_manifest(manifest)["states"]}
     assert states["signal"]["roi"]["single_rois"][0]["coords"] == [0.0, 0.5]
     assert states["image"]["roi"] is None
+
+
+def test_artifacts_show_their_result_digest() -> None:
+    """An analysis artifact carries the digest of the recorded result."""
+    ledger = Ledger()
+    uid = "00000000-0000-4000-8000-000000000001"
+    state_id = ledger.observe(uid, state_facts(signal([1.0, 2.0])))
+    value = {"array": np.array([[0.5, np.nan]]), "title": "FWHM"}
+    ledger.record_activity(
+        call=make_call(None, None, {}, [("source", state_id)]),
+        outputs=[],
+        artifacts=[("result", "table", uid, "_table_fwhm", value)],
+        environment=collect_environment("desktop", "1.0", packages=()),
+        edition="desktop",
+        origin="ordinary",
+        implementation={"package": "p", "version": None, "python_name": "p.f"},
+    )
+    manifest = build_manifest(
+        ledger, {}, workspace_sha256=SHA, workspace_size=1, date_published=DATE
+    )
+    validate_manifest(manifest)
+    (artifact,) = [e for e in manifest["@graph"] if "dlc:artifactKind" in e]
+    assert artifact["dlc:resultDigest"] == value_digest(value)
 
 
 def _zip(entries, compression=zipfile.ZIP_STORED, mode=0o644) -> bytes:

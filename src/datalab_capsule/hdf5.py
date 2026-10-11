@@ -24,6 +24,7 @@ from datalab_capsule.integrity import (
     ProvenanceError,
     image_fingerprint,
     signal_fingerprint,
+    value_digest,
 )
 from datalab_capsule.ledger import Ledger, LedgerError
 
@@ -42,6 +43,7 @@ __all__ = [
     "locate_fingerprints",
     "read_block",
     "read_image",
+    "read_roi",
     "read_signal",
     "save_ledger",
     "scan_object_index",
@@ -57,6 +59,10 @@ MAX_JSON_BYTES = 64 * 1024 * 1024
 MAX_SIGNAL_BYTES = 2 * 1024**3
 #: Largest image ``data`` dataset read for fingerprinting (bytes).
 MAX_IMAGE_BYTES = 2 * 1024**3
+#: Metadata key of an object's region of interest (DataLab and Sigima).
+ROI_METADATA_KEY = "_roi_"
+#: Largest number of HDF5 nodes decoded for one ROI definition.
+MAX_ROI_NODES = 10_000
 
 
 class ProvenanceFormatError(ProvenanceError, ValueError):
@@ -326,6 +332,58 @@ def read_image(h5file: Any, path: str) -> dict[str, Any]:
     return result
 
 
+def _decode_metadata(node: Any, budget: list[int]) -> Any:
+    """Decode a metadata value serialised by guidata (dicts, sequences, arrays).
+
+    Groups carry ``__dict`` (mapping: scalar attributes plus child nodes) or
+    ``__seq`` (``__seq<i>`` children or attributes); datasets hold arrays.
+    *budget* bounds the number of decoded nodes.
+    """
+    h5py = _h5py()
+    budget[0] -= 1
+    if budget[0] < 0:
+        raise ProvenanceFormatError(f"Metadata too large: {node.name}")
+    if isinstance(node, h5py.Dataset):
+        _check_dataset(node, MAX_JSON_BYTES)
+        return node[()]
+    if "__seq" in node.attrs:
+        items = []
+        for index in range(int(node.attrs["__seq"])):
+            name = f"__seq{index}"
+            if name in node:
+                _check_link(node, name)
+                items.append(_decode_metadata(node[name], budget))
+            elif name in node.attrs:
+                items.append(node.attrs[name])
+            else:
+                raise ProvenanceFormatError(f"Missing item {name}: {node.name}")
+        return items
+    if "__dict" not in node.attrs:
+        raise ProvenanceFormatError(f"Unknown metadata node: {node.name}")
+    value = {k: v for k, v in node.attrs.items() if k != "__dict"}
+    for name in node:
+        _check_link(node, name)
+        value[name] = _decode_metadata(node[name], budget)
+    return value
+
+
+def read_roi(h5file: Any, path: str) -> Any:
+    """Read the ROI definition of an object (``metadata/_roi_``), or None.
+
+    Raises:
+        ProvenanceFormatError: If the object or its ROI is malformed.
+    """
+    node = _object_node(h5file, path)
+    if "metadata" not in node:
+        return None
+    _check_link(node, "metadata")
+    metadata = node["metadata"]
+    if ROI_METADATA_KEY not in metadata:
+        return None
+    _check_link(metadata, ROI_METADATA_KEY)
+    return _decode_metadata(metadata[ROI_METADATA_KEY], [MAX_ROI_NODES])
+
+
 def locate_fingerprints(
     h5file: Any, locators: Mapping[str, Mapping[str, str]]
 ) -> dict[str, str | None]:
@@ -363,8 +421,10 @@ def locate_fingerprints(
 def locate_current_states(h5file: Any, ledger: Ledger) -> dict[str, dict[str, str]]:
     """Locate the latest state of each ledger object whose saved data match it.
 
-    Objects changed since their latest recorded state, objects of another kind
-    and states without fingerprint get no locator.
+    A state matches when both its data fingerprint and its ROI (absent or with
+    the same definition) match the saved object. Objects changed since their
+    latest recorded state, objects of another kind and states without
+    fingerprint get no locator.
 
     Returns:
         ``state_id -> {"kind", "path"}``.
@@ -380,12 +440,27 @@ def locate_current_states(h5file: Any, ledger: Ledger) -> dict[str, dict[str, st
             and location["kind"] == state["kind"]
         ):
             candidates[state["state_id"]] = location
-    fingerprints = locate_fingerprints(h5file, candidates)
-    return {
-        state_id: location
-        for state_id, location in candidates.items()
-        if fingerprints[state_id] == ledger.states[state_id]["fingerprint"]["value"]
-    }
+    altered = _altered_states(h5file, ledger, candidates)
+    return {k: v for k, v in candidates.items() if k not in altered}
+
+
+def _altered_states(
+    h5file: Any, ledger: Ledger, locators: Mapping[str, Mapping[str, str]]
+) -> set[str]:
+    """Return the located states whose saved data or ROI no longer match."""
+    fingerprints = locate_fingerprints(h5file, locators)
+    altered = set()
+    for state_id, locator in locators.items():
+        state = ledger.states[state_id]
+        roi = read_roi(h5file, locator["path"])
+        recorded_roi = (state.get("roi") or {}).get("digest")
+        if (
+            state["fingerprint"] is None
+            or fingerprints[state_id] != state["fingerprint"]["value"]
+            or (None if roi is None else value_digest(roi)) != recorded_roi
+        ):
+            altered.add(state_id)
+    return altered
 
 
 def save_ledger(h5file: Any, ledger: Ledger) -> None:
@@ -396,8 +471,8 @@ def save_ledger(h5file: Any, ledger: Ledger) -> None:
 def load_ledger(h5file: Any) -> tuple[Ledger, dict[str, str]] | None:
     """Read the provenance block and derive the status of each state.
 
-    A located state whose data no longer match its fingerprint is ``altered``;
-    a state without locator is ``unavailable``.
+    A located state whose data or ROI no longer match is ``altered``; a state
+    without locator is ``unavailable``.
 
     Returns:
         ``(ledger, state_status)``, or None when the file has no block.
@@ -409,13 +484,11 @@ def load_ledger(h5file: Any) -> tuple[Ledger, dict[str, str]] | None:
     if block is None:
         return None
     ledger, locators = block
-    fingerprints = locate_fingerprints(h5file, locators)
+    altered = _altered_states(h5file, ledger, locators)
     status: dict[str, str] = {}
-    for state_id, state in ledger.states.items():
+    for state_id in ledger.states:
         if state_id not in locators:
             status[state_id] = "unavailable"
-        elif state["fingerprint"] is None or (
-            fingerprints[state_id] != state["fingerprint"]["value"]
-        ):
+        elif state_id in altered:
             status[state_id] = "altered"
     return ledger, status

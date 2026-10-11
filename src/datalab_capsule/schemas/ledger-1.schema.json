@@ -198,7 +198,8 @@
               "properties": {
                 "kind": {"type": "string", "minLength": 1},
                 "object_uuid": {"$ref": "#/$defs/uuid"},
-                "key": {"type": "string", "minLength": 1}
+                "key": {"type": "string", "minLength": 1},
+                "digest": {"description": "Digest of the result value when it was recorded; a different current value means the result was replaced.", "$ref": "#/$defs/digest"}
               }
             }
           }

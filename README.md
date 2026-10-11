@@ -9,7 +9,7 @@ Status: experimental, under development. Nothing is published yet.
 - Neutral provenance model shared by DataLab Desktop and DataLab-Web: operation calls, states, activities, environments (JSON Schemas under `src/datalab_capsule/schemas`).
 - Shared replay preparation (eligibility codes), the `exact` comparison rule and verification reports.
 - HDF5 provenance block (`/DataLab_Provenance`) read and written with h5py alone; links and virtual datasets are refused.
-- Integrity primitives: RFC 8785 canonical JSON, SHA-256 digests, the `datalab-signal-v1` state fingerprint.
+- Integrity primitives: RFC 8785 canonical JSON, SHA-256 digests, the `datalab-signal-v1` and `datalab-image-v1` state fingerprints (data, coordinates or calibration, units). A state also records the digest of its ROI definition, and an analysis result the digest of its stored value: a saved object whose data, calibration, units or ROI differ from its state is `altered`, and a result replaced by a later analysis is never attributed to the earlier one. Fingerprints are streamed into SHA-256 without copying the arrays.
 - Capsules (`.dlcapsule`): a ZIP archive holding `workspace.h5` and an RO-Crate 1.3 manifest (`ro-crate-metadata.json`) that conforms to Process Run Crate 0.6 and to the experimental [DataLab capsule profile 0.1](https://datalab-platform.com/capsule/0.1) (terms: `https://datalab-platform.com/capsule/terms#`). The reader refuses unsafe archives (path traversal, duplicates, links, encryption, size and compression-ratio limits) and never accesses the network. It holds the whole archive in memory: it checks the archive size before reading it, then the size of each entry. Each edition passes its own `SizePolicy`; the default one (4 GiB workspace) is an accepted upper bound, not a tested capacity.
 - Pure Python for CPython 3.9+ and Pyodide (Python 3.12). The core only needs the standard library and `jsonschema`; HDF5 helpers use NumPy and h5py.
 - The package never imports DataLab, Sigima, SigimaX or Qt, and never executes code named in a file.
@@ -44,6 +44,14 @@ Golden vectors and the test suite in Pyodide (Node 22):
 cd tests\pyodide
 npm install
 node run_pyodide.mjs ..\..\dist\datalab_capsule-0.1.0.dev0-py3-none-any.whl
+```
+
+Cost of image fingerprints (time and peak memory), in CPython and in Pyodide:
+
+```powershell
+.\.venv\Scripts\python.exe benchmarks\fingerprint_cost.py
+cd tests\pyodide
+node run_benchmark.mjs ..\..\dist\datalab_capsule-0.1.0.dev0-py3-none-any.whl
 ```
 
 ## License

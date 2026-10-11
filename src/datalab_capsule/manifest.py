@@ -164,6 +164,8 @@ def _activity_entities(
                     "dlc:objectUuid": artifact["object_uuid"],
                     "dlc:key": artifact["key"],
                 }
+                if "digest" in artifact:
+                    graph[artifact_id]["dlc:resultDigest"] = artifact["digest"]
                 entity["dlc:artifact"] = _ref(artifact_id)
             graph[binding_id] = entity
             refs.append(_ref(binding_id))

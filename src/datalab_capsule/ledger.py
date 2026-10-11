@@ -24,7 +24,7 @@ from typing import Any
 from datalab_capsule._schema import load_schema, schema_errors
 from datalab_capsule.calls import CallError, is_opaque, validate_call
 from datalab_capsule.environment import EDITIONS, environment_id
-from datalab_capsule.integrity import ProvenanceError
+from datalab_capsule.integrity import ProvenanceError, value_digest
 
 __all__ = [
     "LEDGER_SCHEMA",
@@ -32,6 +32,7 @@ __all__ = [
     "ORIGINS",
     "Ledger",
     "LedgerError",
+    "artifact_status",
     "load_schema",
     "utc_timestamp",
     "validate_ledger",
@@ -46,6 +47,23 @@ ORIGINS = ("ordinary", "recompute_in_place", "history_replay")
 
 class LedgerError(ProvenanceError, ValueError):
     """Raised when a ledger is invalid or an operation would break it."""
+
+
+def artifact_status(artifact: Mapping[str, Any], value: Any) -> str:
+    """Return the status of a recorded analysis result against its current value.
+
+    Args:
+        artifact: Recorded artifact (``kind``, ``object_uuid``, ``key``,
+         ``digest``).
+        value: Current value stored under the artifact's key, or None.
+
+    Returns:
+        ``available`` when the value is the recorded result, ``replaced`` when
+        another result now holds the key, ``missing`` when the key is absent.
+    """
+    if value is None:
+        return "missing"
+    return "available" if value_digest(value) == artifact.get("digest") else "replaced"
 
 
 def utc_timestamp() -> str:
@@ -289,7 +307,7 @@ class Ledger:
         limits: Iterable[str] = (),
         started_at: str | None = None,
         finished_at: str | None = None,
-        artifacts: Iterable[tuple[str, str, str, str]] = (),
+        artifacts: Iterable[tuple[str, str, str, str, Any]] = (),
     ) -> dict[str, Any]:
         """Append one completed activity and create its output states.
 
@@ -305,8 +323,9 @@ class Ledger:
             limits: Reasons why the activity is not replayable.
             started_at: ISO 8601 start time (informative).
             finished_at: ISO 8601 end time (informative).
-            artifacts: Ordered ``(role, kind, object_uuid, key)`` analysis results
-             stored in an object's metadata, recorded after the state outputs.
+            artifacts: Ordered ``(role, kind, object_uuid, key, value)`` analysis
+             results stored in an object's metadata, recorded after the state
+             outputs with the digest of *value* (see :func:`artifact_status`).
 
         Returns:
             The appended activity.
@@ -336,9 +355,14 @@ class Ledger:
         output_items.extend(
             {
                 "role": role,
-                "artifact": {"kind": kind, "object_uuid": obj_uuid, "key": key},
+                "artifact": {
+                    "kind": kind,
+                    "object_uuid": obj_uuid,
+                    "key": key,
+                    "digest": value_digest(value),
+                },
             }
-            for role, kind, obj_uuid, key in artifacts
+            for role, kind, obj_uuid, key, value in artifacts
         )
         now = utc_timestamp()
         activity = {

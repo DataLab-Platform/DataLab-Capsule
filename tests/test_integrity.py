@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from datalab_capsule import integrity
 from datalab_capsule.integrity import (
     CanonicalJSONError,
     canonical_json,
@@ -123,7 +124,9 @@ def test_signal_state_facts() -> None:
     with_roi = signal_state_facts(_signal(roi=ROI([0.0, 0.5])))
     assert with_roi["limits"] == [] and with_roi["fingerprint"] == facts["fingerprint"]
     assert with_roi["roi"]["definition"] == {
-        "single_rois": [{"coords": [0.0, 0.5], "type": "SegmentROI"}]
+        "single_rois": [
+            {"coords": [0.0, 0.5], "indices": False, "title": "", "type": "SegmentROI"}
+        ]
     }
     assert with_roi["roi"]["digest"] == json_digest(with_roi["roi"]["definition"])
     dy = np.full(4, 0.1)
@@ -169,6 +172,31 @@ def test_image_fingerprint_matches_independent_payload() -> None:
         image_fingerprint(data, xcoords=yc, ycoords=xc)
     with pytest.raises(ValueError):
         image_fingerprint(np.zeros(3))
+
+
+@pytest.mark.parametrize(
+    "layout",
+    ["native", "big_endian", "fortran", "strided"],
+)
+def test_streamed_digest_equals_full_payload(layout, monkeypatch) -> None:
+    """Hashing in chunks or without copy gives the digest of the full payload."""
+    base = np.arange(5 * 7, dtype=np.float64).reshape(5, 7) - 3.5
+    data = {
+        "native": base,
+        "big_endian": base.astype(">f8"),
+        "fortran": np.asfortranarray(base),
+        "strided": np.repeat(base, 2, axis=1)[:, ::2],
+    }[layout]
+    np.testing.assert_array_equal(data, base)
+    descriptor = (
+        b'{"coords":{"uniform":{"dx":1,"dy":1,"x0":0,"y0":0}},"dtype":"<f8",'
+        b'"scheme":"datalab-image-v1","shape":[5,7],"units":{"x":"","y":"","z":""}}'
+    )
+    payload = descriptor + b"\x00" + struct.pack("<35d", *base.ravel())
+    expected = "sha256:" + hashlib.sha256(payload).hexdigest()
+    assert image_fingerprint(data) == expected
+    monkeypatch.setattr(integrity, "HASH_CHUNK_BYTES", 2 * 7 * 8)
+    assert image_fingerprint(data) == expected
 
 
 def test_image_state_facts() -> None:

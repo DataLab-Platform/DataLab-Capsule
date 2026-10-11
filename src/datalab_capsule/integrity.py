@@ -29,6 +29,7 @@ __all__ = [
     "signal_fingerprint",
     "signal_state_facts",
     "state_facts",
+    "value_digest",
 ]
 
 SIGNAL_FINGERPRINT_SCHEME = "datalab-signal-v1"
@@ -175,11 +176,32 @@ def json_digest(value: Any) -> str:
     return sha256_digest(canonical_json_bytes(value))
 
 
-def _row_bytes(row: Any, dtype: Any) -> bytes:
+#: Largest temporary copy made while hashing an array that is not already
+#: C-contiguous little-endian (bytes).
+HASH_CHUNK_BYTES = 8 * 1024**2
+
+
+def _hash_rows(hasher: Any, row: Any, dtype: Any) -> None:
+    """Feed *row* to *hasher* in C order and little-endian byte order.
+
+    Arrays already in that layout are hashed without copy; others are
+    converted in chunks of at most :data:`HASH_CHUNK_BYTES`.
+    """
     import numpy as np  # pylint: disable=import-outside-toplevel
 
     little = np.dtype(dtype).newbyteorder("<")
-    return np.ascontiguousarray(row, dtype=little).tobytes()
+    array = np.asarray(row)
+    if array.dtype == little and array.flags.c_contiguous:
+        hasher.update(array.reshape(-1).view(np.uint8))
+        return
+    if array.ndim == 0 or array.shape[0] == 0:
+        hasher.update(np.ascontiguousarray(array, dtype=little).tobytes())
+        return
+    item_bytes = little.itemsize * max(1, array[0].size)
+    step = max(1, HASH_CHUNK_BYTES // item_bytes)
+    for start in range(0, array.shape[0], step):
+        chunk = np.ascontiguousarray(array[start : start + step], dtype=little)
+        hasher.update(chunk.reshape(-1).view(np.uint8))
 
 
 def _present_uncertainty(row: Any) -> bool:
@@ -239,9 +261,10 @@ def signal_fingerprint(
         "rows": names,
         "units": {"x": xunit or "", "y": yunit or ""},
     }
-    payload = [canonical_json_bytes(descriptor), b"\x00"]
-    payload.extend(_row_bytes(row, dtype) for row in rows)
-    return sha256_digest(b"".join(payload))
+    hasher = hashlib.sha256(canonical_json_bytes(descriptor) + b"\x00")
+    for row in rows:
+        _hash_rows(hasher, row, dtype)
+    return "sha256:" + hasher.hexdigest()
 
 
 def signal_state_facts(obj: Any) -> dict[str, Any]:
@@ -303,14 +326,35 @@ def signal_state_facts(obj: Any) -> dict[str, Any]:
 
 
 def _json_ready(value: Any) -> Any:
-    """Return *value* with NumPy scalars and arrays turned into JSON values."""
+    """Return *value* as plain JSON values.
+
+    NumPy scalars and arrays become Python values and lists, tuples become
+    lists, bytes become UTF-8 text and non-finite floats become
+    ``{"$float": "NaN" | "Infinity" | "-Infinity"}``.
+    """
     if isinstance(value, dict):
         return {str(k): _json_ready(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [_json_ready(v) for v in value]
+    if isinstance(value, bytes):
+        return value.decode("utf-8")
     if hasattr(value, "tolist"):
         return _json_ready(value.tolist())
+    if isinstance(value, float) and not math.isfinite(value):
+        text = (
+            "NaN" if math.isnan(value) else ("Infinity" if value > 0 else "-Infinity")
+        )
+        return {"$float": text}
     return value
+
+
+def value_digest(value: Any) -> str:
+    """Return the digest of a JSON-like value (NumPy values and NaN accepted).
+
+    Used for ROI definitions and analysis results read from an object or from
+    its HDF5 serialisation: both give the same digest for the same content.
+    """
+    return json_digest(_json_ready(value))
 
 
 def roi_facts(roi: Any) -> dict[str, Any] | None:
@@ -380,13 +424,13 @@ def image_fingerprint(
             "dx": float(dx),
             "dy": float(dy),
         }
-        extra: list[bytes] = []
+        extra: list[Any] = []
     else:
         xc, yc = np.asarray(xcoords), np.asarray(ycoords)
         if xc.shape != (array.shape[1],) or yc.shape != (array.shape[0],):
             raise ValueError("Image coordinates must match the data shape")
         coords = {"x": int(xc.size), "y": int(yc.size)}
-        extra = [_row_bytes(xc, np.float64), _row_bytes(yc, np.float64)]
+        extra = [xc, yc]
     descriptor = {
         "scheme": IMAGE_FINGERPRINT_SCHEME,
         "dtype": dtype.str,
@@ -394,9 +438,11 @@ def image_fingerprint(
         "coords": {"uniform" if uniform else "nonuniform": coords},
         "units": {"x": xunit or "", "y": yunit or "", "z": zunit or ""},
     }
-    payload = [canonical_json_bytes(descriptor), b"\x00", _row_bytes(array, dtype)]
-    payload.extend(extra)
-    return sha256_digest(b"".join(payload))
+    hasher = hashlib.sha256(canonical_json_bytes(descriptor) + b"\x00")
+    _hash_rows(hasher, array, dtype)
+    for row in extra:
+        _hash_rows(hasher, row, np.float64)
+    return "sha256:" + hasher.hexdigest()
 
 
 def image_state_facts(obj: Any) -> dict[str, Any]:

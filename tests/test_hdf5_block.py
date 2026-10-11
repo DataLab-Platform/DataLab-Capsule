@@ -23,15 +23,16 @@ from datalab_capsule.hdf5 import (
     locate_fingerprints,
     read_block,
     read_image,
+    read_roi,
     read_signal,
     save_ledger,
     scan_object_index,
     write_block,
 )
-from datalab_capsule.integrity import signal_state_facts, state_facts
+from datalab_capsule.integrity import signal_state_facts, state_facts, value_digest
 from datalab_capsule.ledger import Ledger
 
-from .helpers import image, signal
+from .helpers import ROI, image, signal, write_metadata
 
 FIXTURES = Path(__file__).parent / "fixtures" / "expressiveness"
 LEDGER_FIXTURES = sorted(
@@ -181,6 +182,131 @@ def test_absent_block() -> None:
     """A file without the block reports provenance as absent."""
     with _memory_file() as h5file:
         assert read_block(h5file) is None
+
+
+IMAGE_PATH = "/DataLab_Ima/g: G/i1: I"
+
+
+def _saved_image_with_roi(h5file, roi: ROI | None) -> tuple[Ledger, str]:
+    """Save one calibrated image (with *roi*) and its ledger into *h5file*."""
+    data = np.arange(12, dtype=np.float32).reshape(3, 4)
+    ledger = Ledger()
+    state_id = ledger.observe(
+        OBJ_UUID, state_facts(image(data, x0=1.0, dx=0.5, roi=roi))
+    )
+    _write_image(h5file, IMAGE_PATH, data, OBJ_UUID, x0=1.0, dx=0.5)
+    if roi is not None:
+        write_metadata(h5file[IMAGE_PATH]["metadata"], "_roi_", roi.to_dict())
+    save_ledger(h5file, ledger)
+    return ledger, state_id
+
+
+def test_roi_is_read_back_from_the_file() -> None:
+    """The ROI read from HDF5 has the digest recorded from the live object."""
+    roi = ROI([0.0, 0.0, 2.0, 2.0], kind="RectangularROI")
+    with _memory_file() as h5file:
+        ledger, state_id = _saved_image_with_roi(h5file, roi)
+        assert read_roi(h5file, IMAGE_PATH) is not None
+        assert (
+            value_digest(read_roi(h5file, IMAGE_PATH))
+            == (ledger.states[state_id]["roi"]["digest"])
+        )
+        assert load_ledger(h5file)[1] == {}
+
+
+def _shift_roi(h5file) -> None:
+    h5file[f"{IMAGE_PATH}/metadata/_roi_/single_rois/__seq0/coords"][2] = 3.0
+
+
+def _drop_roi(h5file) -> None:
+    del h5file[f"{IMAGE_PATH}/metadata/_roi_"]
+
+
+def _invert_roi(h5file) -> None:
+    h5file[f"{IMAGE_PATH}/metadata/_roi_/single_rois/__seq0"].attrs["inverse"] = True
+
+
+@pytest.mark.parametrize("change", [_shift_roi, _drop_roi, _invert_roi])
+def test_roi_change_in_file_is_altered(change) -> None:
+    """Unchanged pixels with a different ROI do not make the state intact."""
+    roi = ROI([0.0, 0.0, 2.0, 2.0], kind="RectangularROI")
+    with _memory_file() as h5file:
+        _ledger, state_id = _saved_image_with_roi(h5file, roi)
+        change(h5file)
+        assert load_ledger(h5file)[1] == {state_id: "altered"}
+
+
+def test_roi_added_in_file_is_altered() -> None:
+    """A ROI added to an object recorded without ROI alters its state."""
+    with _memory_file() as h5file:
+        _ledger, state_id = _saved_image_with_roi(h5file, None)
+        roi = ROI([0.0, 0.0, 2.0, 2.0], kind="RectangularROI")
+        write_metadata(h5file[IMAGE_PATH]["metadata"], "_roi_", roi.to_dict())
+        assert load_ledger(h5file)[1] == {state_id: "altered"}
+
+
+def _set_attr(name: str, value):
+    def change(h5file) -> None:
+        h5file[IMAGE_PATH].attrs[name] = value
+
+    change.__name__ = f"{name}={value}"
+    return change
+
+
+def _make_nonuniform(h5file) -> None:
+    group = h5file[IMAGE_PATH]
+    group.attrs["is_uniform_coords"] = False
+    del group["xcoords"], group["ycoords"]
+    group["xcoords"] = 1.0 + 0.5 * np.arange(4.0)
+    group["ycoords"] = np.arange(3.0)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        _set_attr("x0", 1.25),
+        _set_attr("dy", 2.0),
+        _set_attr("xunit", "um"),
+        _set_attr("zunit", ""),
+        _make_nonuniform,
+    ],
+    ids=lambda c: c.__name__,
+)
+def test_calibration_or_unit_change_in_file_is_altered(change) -> None:
+    """Image calibration and units belong to the state, not only the pixels."""
+    with _memory_file() as h5file:
+        _ledger, state_id = _saved_image_with_roi(h5file, None)
+        change(h5file)
+        assert load_ledger(h5file)[1] == {state_id: "altered"}
+
+
+def test_roi_or_calibration_change_in_memory_is_a_new_state() -> None:
+    """A ROI-only or calibration-only change creates a new state on observe."""
+    data = np.ones((2, 2))
+    roi = ROI([0.0, 0.0, 1.0, 1.0], kind="RectangularROI")
+    ledger = Ledger()
+    base = ledger.observe(OBJ_UUID, state_facts(image(data)))
+    with_roi = ledger.observe(OBJ_UUID, state_facts(image(data, roi=roi)))
+    moved = ledger.observe(OBJ_UUID, state_facts(image(data, x0=0.5, roi=roi)))
+    assert len({base, with_roi, moved}) == 3
+    assert ledger.states[base]["fingerprint"] == ledger.states[with_roi]["fingerprint"]
+    with _memory_file() as h5file:
+        _write_image(h5file, IMAGE_PATH, data, OBJ_UUID, x0=0.5)
+        write_metadata(h5file[IMAGE_PATH]["metadata"], "_roi_", roi.to_dict())
+        assert set(locate_current_states(h5file, ledger)) == {moved}
+        # Earlier states of the same pixels are not located as current.
+        h5file[IMAGE_PATH].attrs["x0"] = 0.0
+        assert locate_current_states(h5file, ledger) == {}
+
+
+def test_metadata_decoder_is_bounded(monkeypatch) -> None:
+    """An oversized ROI definition is refused rather than decoded."""
+    roi = ROI([0.0, 0.0, 2.0, 2.0], kind="RectangularROI")
+    with _memory_file() as h5file:
+        _saved_image_with_roi(h5file, roi)
+        monkeypatch.setattr(hdf5_module, "MAX_ROI_NODES", 2)
+        with pytest.raises(ProvenanceFormatError, match="too large"):
+            read_roi(h5file, IMAGE_PATH)
 
 
 @pytest.mark.parametrize(

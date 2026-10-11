@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import copy
 import json
+from typing import Any
 
+import numpy as np
 import pytest
 
 from datalab_capsule.calls import (
@@ -16,8 +18,8 @@ from datalab_capsule.calls import (
     validate_call,
 )
 from datalab_capsule.environment import collect_environment
-from datalab_capsule.integrity import signal_state_facts
-from datalab_capsule.ledger import Ledger, LedgerError
+from datalab_capsule.integrity import signal_state_facts, value_digest
+from datalab_capsule.ledger import Ledger, LedgerError, artifact_status
 
 from .helpers import ROI, signal
 
@@ -194,20 +196,26 @@ def test_roi_is_part_of_the_state() -> None:
     ledger.validate()
 
 
-def test_artifact_outputs() -> None:
-    """Analysis results are recorded as artifacts after the state outputs."""
-    ledger = Ledger()
-    uid = "00000000-0000-4000-8000-000000000001"
-    state_id = ledger.observe(uid, signal_state_facts(signal([1.0, 2.0])))
-    activity = ledger.record_activity(
+def _analysis(ledger: Ledger, uid: str, state_id: str, value: Any) -> dict:
+    """Record an analysis of *state_id* storing *value* under one key."""
+    return ledger.record_activity(
         call=make_call(None, None, {}, [("source", state_id)]),
         outputs=[],
-        artifacts=[("result", "geometry", uid, "_geometry_fwhm")],
+        artifacts=[("result", "geometry", uid, "_geometry_fwhm", value)],
         environment=_environment(),
         edition="desktop",
         origin="ordinary",
         implementation={"package": "p", "version": None, "python_name": "p.fwhm"},
     )
+
+
+def test_artifact_outputs() -> None:
+    """Analysis results are recorded as artifacts after the state outputs."""
+    ledger = Ledger()
+    uid = "00000000-0000-4000-8000-000000000001"
+    state_id = ledger.observe(uid, signal_state_facts(signal([1.0, 2.0])))
+    value = {"array": np.array([[0.5, np.nan]]), "title": "FWHM"}
+    activity = _analysis(ledger, uid, state_id, value)
     assert activity["outputs"] == [
         {
             "role": "result",
@@ -215,7 +223,31 @@ def test_artifact_outputs() -> None:
                 "kind": "geometry",
                 "object_uuid": uid,
                 "key": "_geometry_fwhm",
+                "digest": value_digest(value),
             },
         }
     ]
     ledger.validate()
+
+
+def test_replaced_artifact_is_never_attributed_to_the_first_activity() -> None:
+    """Two analyses writing the same key: only the latest result is available."""
+    ledger = Ledger()
+    uid = "00000000-0000-4000-8000-000000000001"
+    state_id = ledger.observe(uid, signal_state_facts(signal([1.0, 2.0])))
+    first_value = {"array": np.array([[0.5, 1.0]]), "title": "FWHM"}
+    second_value = {"array": np.array([[0.5, 2.0]]), "title": "FWHM"}
+    first = _analysis(ledger, uid, state_id, first_value)
+    second = _analysis(ledger, uid, state_id, second_value)
+    first_artifact = first["outputs"][0]["artifact"]
+    second_artifact = second["outputs"][0]["artifact"]
+    assert first_artifact["key"] == second_artifact["key"]
+    # The key now holds the second result.
+    assert artifact_status(first_artifact, second_value) == "replaced"
+    assert artifact_status(second_artifact, second_value) == "available"
+    # The same content read back as plain lists (HDF5 round trip) still matches.
+    assert (
+        artifact_status(second_artifact, {"array": [[0.5, 2.0]], "title": "FWHM"})
+        == "available"
+    )
+    assert artifact_status(first_artifact, None) == "missing"
