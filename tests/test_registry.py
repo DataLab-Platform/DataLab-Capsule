@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import threading
 import zipfile
 from pathlib import Path
 
@@ -120,6 +122,42 @@ def test_attachments_are_checked_against_the_manifest(published) -> None:
     with pytest.raises(RegistryError, match="altered"):
         registry.get_attachment(child_fp, "protocol.txt")
     del parent
+
+
+def test_concurrent_uploads_of_the_same_attachment(published, monkeypatch) -> None:
+    """Two uploads of the same bytes, both past the existence check, both succeed."""
+    registry, _parent, child = published
+    child_fp = manifest_fingerprint(json.loads(child))
+    replace, barrier = os.replace, threading.Barrier(2, timeout=10)
+    first_done = threading.Event()
+
+    def replace_one_after_the_other(src, dst):
+        if barrier.wait():
+            first_done.wait(10)
+        replace(src, dst)
+        first_done.set()
+
+    monkeypatch.setattr(
+        "datalab_capsule.registry.os.replace", replace_one_after_the_other
+    )
+    errors: list[BaseException] = []
+
+    def upload() -> None:
+        try:
+            registry.put_attachment(child_fp, "protocol.txt", NOTE["data"])
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=upload) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(30)
+    assert errors == []
+    assert registry.get_attachment(child_fp, "protocol.txt") == NOTE["data"]
+    assert [p.name for p in (registry.root / "attachments").iterdir()] == [
+        registry.get_revision(child_fp)["attachments"][0]["sha256"]
+    ]
 
 
 def test_reviews_target_published_revisions(published) -> None:

@@ -21,6 +21,7 @@ export REGISTRY_TOKEN="$(openssl rand -hex 32)"   # keep it in a secret store, n
 - The token is read from the environment variable named by `--token-env`, never from the command line. Without a token, publishing is open: local use only.
 - `--origin` lists the browser origins allowed to call the registry (DataLab-Web deployments), without credentials. Repeat it for several origins; the default (any origin) is for local use.
 - Run it as an unprivileged user, as a service (systemd or equivalent), listening on `127.0.0.1` only.
+- Run one server process per registry folder: the command starts a single process, and two processes sharing the same folder are not supported.
 
 ### Behind a reverse proxy
 

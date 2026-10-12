@@ -19,6 +19,7 @@ import contextlib
 import os
 import re
 import sqlite3
+import tempfile
 import threading
 from collections.abc import Iterator
 from pathlib import Path
@@ -154,10 +155,21 @@ class Registry:
 
     @staticmethod
     def _write(path: Path, data: bytes) -> None:
-        """Write *data* to *path* atomically (never a partial file)."""
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_bytes(data)
-        os.replace(tmp, path)
+        """Write *data* to *path* atomically (never a partial file).
+
+        Each write has its own temporary file, so concurrent writers of the
+        same path (same content, named by its digest or fingerprint) never
+        share one.
+        """
+        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(data)
+            os.replace(tmp, path)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+            raise
 
     def _manifest_path(self, fingerprint: str) -> Path:
         return self.root / "manifests" / f"{fingerprint[7:]}.json"
