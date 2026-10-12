@@ -165,6 +165,34 @@ def test_resaved_workspace_is_not_a_scientific_change() -> None:
     assert diff["old"] == manifest_fingerprint(old) != manifest_fingerprint(new)
 
 
+def test_attachment_contents_withhold_equality() -> None:
+    """Same workspace, different attachment contents: equality is not concluded.
+
+    An attachment such as a calibration certificate may matter scientifically
+    and is not interpreted. Its description or media type alone does not.
+    """
+    data = CHAIN.read_bytes()
+    note = {"name": "certificate.txt", "data": b"Gain 1.02", "media_type": "text/plain"}
+
+    def manifest(*attachments: dict) -> dict:
+        capsule = create_from_hdf5(
+            data, date_published=DATE, attachments=list(attachments)
+        )
+        return read_capsule(capsule).manifest
+
+    plain, certified = manifest(), manifest(note)
+    recertified = manifest({**note, "data": b"Gain 1.03"})
+    described = manifest({**note, "description": "Calibration certificate"})
+    for old, new in ((plain, certified), (certified, plain), (certified, recertified)):
+        diff = diff_manifests(old, new)
+        assert diff["scientific"] == diff["storage"] == []
+        assert diff["attachments"]
+        assert diff["scientific_conclusion"] == "none_detected"
+    diff = diff_manifests(certified, described)
+    assert [c["field"] for c in diff["attachments"]] == ["description"]
+    assert diff["scientific_conclusion"] == "none"
+
+
 def test_roi_change_is_scientific() -> None:
     """A different ROI on the same data is a scientific change of the state."""
     ledger, locators = _read(SOURCES / "capture_desktop.h5")

@@ -108,10 +108,11 @@ def _print_summary(summary: dict) -> None:
 
 _CONCLUSIONS = {
     "differences": "scientific changes found",
-    "none": "no scientific change, same workspace file",
+    "none": "no scientific change, same workspace file and attachments",
     "none_detected": (
         "no change in the recorded activities and states; the workspace files "
-        "differ and content outside the recorded provenance is not compared"
+        "or the attachments differ and content outside the recorded provenance "
+        "is not compared"
     ),
 }
 

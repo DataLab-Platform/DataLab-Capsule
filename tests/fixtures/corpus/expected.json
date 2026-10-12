@@ -39,9 +39,11 @@
       "argv": ["diff", "valid/difference-desktop.dlcapsule", "valid/attachments.dlcapsule", "--json"],
       "exit": 1,
       "json": {
+        "scientific_conclusion": "none_detected",
         "changes": {
           "scientific": [],
           "presentation": ["changed capsule description", "changed capsule name"],
+          "storage": [],
           "environment": [],
           "attachments": ["added attachment", "added attachment"]
         }

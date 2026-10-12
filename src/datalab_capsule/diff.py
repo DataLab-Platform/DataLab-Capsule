@@ -20,10 +20,12 @@ Changes are sorted into five groups:
 
 ``scientific_conclusion`` states what the comparison can conclude, without
 claiming more than the manifests cover: ``"differences"`` (scientific changes
-found), ``"none"`` (no scientific change and the same workspace bytes) or
-``"none_detected"`` (no change in the recorded activities and states, but the
-workspace files differ: content outside the recorded provenance is not
-compared, so equality is not established).
+found), ``"none"`` (no scientific change, the same workspace bytes and the same
+attachment contents) or ``"none_detected"`` (no change in the recorded
+activities and states, but the workspace files or the attachment contents
+differ: content outside the recorded provenance is not compared, so equality is
+not established). A changed attachment description or media type alone does not
+withhold ``"none"``.
 
 Activities and states are matched by their identifiers, which a revision keeps
 for everything it inherits. Nothing is computed; only the manifests are read.
@@ -198,9 +200,13 @@ def diff_manifests(old: Any, new: Any) -> dict[str, Any]:
     )
     old_fp, new_fp = manifest_fingerprint(old), manifest_fingerprint(new)
     root = _entities(new)["./"]
+    attachment_contents = any(
+        change["change"] != "changed" or change["field"] in ("sha256", "size")
+        for change in attachments
+    )
     if scientific:
         conclusion = "differences"
-    elif old_ws["sha256"] == new_ws["sha256"]:
+    elif old_ws["sha256"] == new_ws["sha256"] and not attachment_contents:
         conclusion = "none"
     else:
         conclusion = "none_detected"
