@@ -20,7 +20,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from datalab_capsule.archive import read_capsule
+from datalab_capsule.archive import MAX_ATTACHMENT_BYTES, read_capsule
 from datalab_capsule.integrity import ProvenanceError, load_json, sha256_digest
 from datalab_capsule.manifest import (
     MANIFEST_NAME,
@@ -28,16 +28,38 @@ from datalab_capsule.manifest import (
     manifest_fingerprint,
     validate_manifest,
 )
+from datalab_capsule.registry import MAX_REGISTRY_MANIFEST_BYTES
 from datalab_capsule.review import validate_review
 
-__all__ = ["RegistryClient", "RegistryClientError", "fetch_revision"]
+__all__ = [
+    "MAX_LISTING_BYTES",
+    "MAX_REPLY_BYTES",
+    "RegistryClient",
+    "RegistryClientError",
+    "fetch_revision",
+]
 
 #: Seconds before a registry request is abandoned.
 TIMEOUT = 30
+#: Largest listing read (revisions, or the reviews of a revision).
+MAX_LISTING_BYTES = 16 * 1024 * 1024
+#: Largest short reply read (publication result, error, status).
+MAX_REPLY_BYTES = 64 * 1024
 
 
 class RegistryClientError(ProvenanceError):
     """Raised when the registry refuses a request or returns invalid data."""
+
+
+def _read(response: Any, limit: int) -> bytes:
+    """Read a response body, refusing it as soon as it exceeds *limit* bytes."""
+    declared = response.headers.get("Content-Length")
+    if declared is not None and declared.isdigit() and int(declared) > limit:
+        raise RegistryClientError(f"The registry response exceeds {limit} bytes")
+    data = response.read(limit + 1)
+    if len(data) > limit:
+        raise RegistryClientError(f"The registry response exceeds {limit} bytes")
+    return data
 
 
 class RegistryClient:
@@ -56,7 +78,12 @@ class RegistryClient:
         self.token = token
 
     def _request(
-        self, method: str, path: str, data: bytes | None = None, kind: str = ""
+        self,
+        method: str,
+        path: str,
+        data: bytes | None = None,
+        kind: str = "",
+        limit: int = MAX_REPLY_BYTES,
     ) -> bytes:
         request = urllib.request.Request(self.base + path, data=data, method=method)
         if kind:
@@ -65,11 +92,13 @@ class RegistryClient:
             request.add_header("Authorization", f"Bearer {self.token}")
         try:
             with urllib.request.urlopen(request, timeout=TIMEOUT) as response:  # noqa: S310
-                return response.read()
+                return _read(response, limit)
         except urllib.error.HTTPError as exc:
             try:
-                detail = json.loads(exc.read()).get("detail", exc.reason)
-            except ValueError:
+                detail = json.loads(_read(exc, MAX_REPLY_BYTES)).get(
+                    "detail", exc.reason
+                )
+            except (ValueError, AttributeError, RegistryClientError):
                 detail = exc.reason
             raise RegistryClientError(f"Registry error {exc.code}: {detail}") from None
         except urllib.error.URLError as exc:
@@ -81,20 +110,32 @@ class RegistryClient:
 
     def list_revisions(self) -> list[dict[str, Any]]:
         """Flat list of revisions, most recently published first."""
-        return load_json(self._request("GET", "/revisions"))
+        return load_json(self._request("GET", "/revisions", limit=MAX_LISTING_BYTES))
 
     def get_manifest(self, fingerprint: str) -> bytes:
         """Manifest as published (not checked)."""
-        return self._request("GET", self._revision(fingerprint))
+        return self._request(
+            "GET", self._revision(fingerprint), limit=MAX_REGISTRY_MANIFEST_BYTES
+        )
 
     def list_reviews(self, fingerprint: str) -> list[Any]:
         """Reviews of a revision (not checked)."""
-        return load_json(self._request("GET", self._revision(fingerprint) + "/reviews"))
+        return load_json(
+            self._request(
+                "GET",
+                self._revision(fingerprint) + "/reviews",
+                limit=MAX_LISTING_BYTES,
+            )
+        )
 
-    def get_attachment(self, fingerprint: str, name: str) -> bytes:
-        """Attachment bytes (not checked)."""
+    def get_attachment(
+        self, fingerprint: str, name: str, max_bytes: int = MAX_ATTACHMENT_BYTES
+    ) -> bytes:
+        """Attachment bytes (not checked), at most *max_bytes*."""
         path = self._revision(fingerprint) + "/attachments/"
-        return self._request("GET", path + urllib.parse.quote(name, safe=""))
+        return self._request(
+            "GET", path + urllib.parse.quote(name, safe=""), limit=max_bytes
+        )
 
     def publish_capsule(
         self, capsule: str | bytes, reviews: list[bytes] = ()
@@ -163,7 +204,9 @@ def fetch_revision(client: RegistryClient, fingerprint: str) -> dict[str, Any]:
     for declared in inspect_manifest(manifest)["attachments"]:
         name, data, status = declared["name"], None, "valid"
         try:
-            fetched = client.get_attachment(fingerprint, name)
+            fetched = client.get_attachment(
+                fingerprint, name, min(int(declared["size"]), MAX_ATTACHMENT_BYTES)
+            )
         except RegistryClientError as exc:
             status = str(exc)
         else:

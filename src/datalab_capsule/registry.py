@@ -18,12 +18,11 @@ from __future__ import annotations
 import contextlib
 import os
 import re
-import sqlite3
 import tempfile
 import threading
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from datalab_capsule.archive import MAX_ATTACHMENT_BYTES
 from datalab_capsule.integrity import ProvenanceError, load_json, sha256_digest
@@ -35,6 +34,9 @@ from datalab_capsule.manifest import (
     validate_manifest,
 )
 from datalab_capsule.review import review_fingerprint, validate_review
+
+if TYPE_CHECKING:
+    import sqlite3
 
 __all__ = [
     "MAX_LISTED",
@@ -144,6 +146,9 @@ class Registry:
     @contextlib.contextmanager
     def _db(self) -> Iterator[sqlite3.Connection]:
         """One connection per operation, serialised: simple and thread-safe."""
+        # Imported here: Pyodide has no sqlite3, and clients only need the limits.
+        import sqlite3  # pylint: disable=import-outside-toplevel
+
         with self._lock:
             db = sqlite3.connect(self.root / "registry.sqlite3")
             db.row_factory = sqlite3.Row

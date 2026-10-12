@@ -80,7 +80,7 @@ changes = diff_manifests(old.manifest, new.manifest)
 
 Errors: 401 without the token for a write, 404 for an unknown revision, attachment or review (`RegistryNotFound`), 413 for an oversized body, 422 for an invalid document or fingerprint (`RegistryError`).
 
-Client (standard library): `registry_client.RegistryClient(url, token=None)` with `list_revisions()`, `get_manifest(fingerprint)`, `list_reviews(fingerprint)`, `get_attachment(fingerprint, name)` (unchecked bytes) and `publish_capsule(capsule, reviews=())` (manifest, attachments, reviews; never the workspace); `registry_client.fetch_revision(client, fingerprint)` returns the manifest checked against the fingerprint, each review with its status and each declared attachment checked against its size and SHA-256. Errors raise `RegistryClientError`.
+Client (standard library): `registry_client.RegistryClient(url, token=None)` with `list_revisions()`, `get_manifest(fingerprint)`, `list_reviews(fingerprint)`, `get_attachment(fingerprint, name, max_bytes=16 MiB)` (unchecked bytes) and `publish_capsule(capsule, reviews=())` (manifest, attachments, reviews; never the workspace); `registry_client.fetch_revision(client, fingerprint)` returns the manifest checked against the fingerprint, each review with its status and each declared attachment checked against its size and SHA-256. Each response is read up to a limit and refused beyond it: 16 MiB for a listing (`MAX_LISTING_BYTES`), the registry's manifest limit for a manifest, the declared size for an attachment fetched by `fetch_revision`, 64 KiB for other replies and errors (`MAX_REPLY_BYTES`). Errors raise `RegistryClientError`.
 
 ## Schemas
 

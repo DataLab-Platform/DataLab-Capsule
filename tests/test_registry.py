@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import http.server
 import io
 import json
 import os
@@ -26,6 +27,12 @@ from datalab_capsule.registry import (  # noqa: E402
     Registry,
     RegistryError,
     RegistryNotFound,
+)
+from datalab_capsule.registry_client import (  # noqa: E402
+    MAX_LISTING_BYTES,
+    MAX_REPLY_BYTES,
+    RegistryClient,
+    RegistryClientError,
 )
 
 NOTE = {
@@ -284,3 +291,49 @@ def test_http_cross_origin_and_openapi(client) -> None:
     assert "access-control-allow-origin" not in other.headers
     paths = http.get("/openapi.json").json()["paths"]
     assert "/api/v1/revisions/{fingerprint}/attachments/{name}" in paths
+
+
+# -- Client against a misbehaving registry -------------------------------------
+
+
+@pytest.fixture(name="serve")
+def _serve():
+    """Serve fixed bodies: ``serve(body, length=True, status=200)`` gives the URL."""
+    servers = []
+
+    def serve(body: bytes, length: bool = True, status: int = 200) -> str:
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # noqa: N802
+                self.send_response(status)
+                if length:
+                    self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args) -> None:
+                del args
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        servers.append(server)
+        return f"http://127.0.0.1:{server.server_address[1]}"
+
+    yield serve
+    for server in servers:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.parametrize("length", [True, False])
+def test_client_refuses_oversized_responses(serve, length: bool) -> None:
+    """Each response is read up to its limit, announced size or not."""
+    oversized = RegistryClient(serve(b"[" + b" " * MAX_LISTING_BYTES + b"]", length))
+    with pytest.raises(RegistryClientError, match="exceeds"):
+        oversized.list_revisions()
+    attachment = RegistryClient(serve(b"x" * 101, length))
+    with pytest.raises(RegistryClientError, match="exceeds 100 bytes"):
+        attachment.get_attachment("sha256:" + "0" * 64, "a.txt", max_bytes=100)
+    assert attachment.get_attachment("sha256:" + "0" * 64, "a.txt", 101) == (b"x" * 101)
+    error = RegistryClient(serve(b" " * (MAX_REPLY_BYTES + 1), length, status=500))
+    with pytest.raises(RegistryClientError, match="Registry error 500"):
+        error.list_revisions()
