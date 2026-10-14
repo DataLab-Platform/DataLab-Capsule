@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 
 from datalab_capsule.recorder import (
+    CandidateError,
     Computation,
     Recorder,
     RecorderHost,
@@ -74,15 +75,41 @@ def plugin(src, offset):
     return signal(src.y - offset, x=src.x)
 
 
+@dataclasses.dataclass
+class FakeTable:
+    """Fake analysis result."""
+
+    data: Any
+
+    def to_dict(self) -> dict:
+        """Stored form of the result."""
+        return {
+            "title": "Peaks",
+            "kind": "custom",
+            "names": ["x"],
+            "data": [[float(v)] for v in self.data],
+            "roi_indices": None,
+            "func_name": "detect",
+            "attrs": {},
+        }
+
+
+def detect(src, threshold):
+    """Fake analysis with an optional output: positions above a threshold."""
+    found = src.x[src.y > threshold]
+    return FakeTable(found) if threshold >= 0 else None
+
+
 CONTRACTS = {
     ("test.scale", 1): FakeContract(scale),
     ("test.shift", 1): FakeContract(shift, qualified=False),
+    ("test.detect", 1): FakeContract(detect),
 }
 
 
 def describe_call(func, inputs, param, *, roles=None, contract=...):
     """Fake description of a call."""
-    known = {scale: "test.scale", shift: "test.shift"}
+    known = {scale: "test.scale", shift: "test.shift", detect: "test.detect"}
     identified = contract is ... and func in known
     return {
         "operation": {"id": known[func], "contract_version": 1} if identified else None,
@@ -98,6 +125,7 @@ def describe_call(func, inputs, param, *, roles=None, contract=...):
         "roles": list(roles or ["source"]),
         "parameters": None if param == "unencodable" else {"factor": param},
         "parameter_codec": 2,
+        "options": {"o": False} if func is shift else {},
         "limits": ["parameters_not_encoded"] if param == "unencodable" else [],
         "implementation": {"package": "test", "version": "1", "python_name": "x"},
     }
@@ -118,6 +146,13 @@ def prepare_execution(contract, inputs, *, values, context):
     return FakePrepared(contract.function, (*inputs, values["factor"]), context)
 
 
+def _normalize_outputs(_contract, result):
+    """Fake output normalization: a text is not a valid output."""
+    if isinstance(result, str):
+        raise TypeError("unexpected output")
+    return [("result", result)]
+
+
 def computation() -> Computation:
     """Fake computation library."""
     codes = {
@@ -128,7 +163,7 @@ def computation() -> Computation:
         describe_call=describe_call,
         get_contract=get_contract,
         prepare_execution=prepare_execution,
-        normalize_outputs=lambda _c, result: [("result", result)],
+        normalize_outputs=_normalize_outputs,
         eligibility_code=lambda exc: codes.get(type(exc)),
         comparison_rule=lambda contract: contract.rule,
     )
@@ -194,6 +229,8 @@ def test_capture_qualified_and_opaque_calls(workspace) -> None:
     assert activity["edition"] == "desktop" and activity["command_id"] == UUIDS[18]
     _pending, activity = _run(recorder, workspace, shift, 1.0, index=2)
     assert activity["call"]["operation"] == {"id": "test.shift", "contract_version": 1}
+    # The options read by the computation are recorded from its description.
+    assert activity["context"]["options"] == {"o": False}
     _pending, activity = _run(recorder, workspace, plugin, 1.0, index=3)
     assert activity["call"]["operation"] is None
     assert activity["implementation"]["python_name"] == "x"
@@ -268,8 +305,24 @@ def test_verify(workspace) -> None:
     report = recorder.verify(activity_id, lambda p: p.run())
     assert (report["eligibility"], report["verdict"]) == ("ready", "exact")
     assert report["rule"] == {"kind": "exact"}
-    failed = recorder.verify(activity_id, lambda p: None)
+    absent = recorder.verify(activity_id, lambda p: None)
+    assert absent["verdict"] == "different"
+    assert absent["outputs"][0]["detail"] == "No result was produced"
+
+    def cancelled(_prepared):
+        raise CandidateError("cancelled")
+
+    failed = recorder.verify(activity_id, cancelled)
     assert failed["verdict"] == "not_verified" and "failed" in failed["reason"]
+    assert "outputs" not in failed
+    unexpected = recorder.verify(activity_id, lambda p: "text")
+    assert unexpected["verdict"] == "not_verified"
+    assert "does not match" in unexpected["reason"]
+    image = recorder.verify(activity_id, lambda p: FakeTable([1.0]))
+    assert (
+        image["verdict"] == "different"
+        and "instead of" in (image["outputs"][0]["detail"])
+    )
     CONTRACTS[("test.scale", 1)].rule = {
         "rule": "tolerance",
         "outputs": {"result": {"atol": 1e-6, "rtol": 0.0}},
@@ -382,3 +435,55 @@ def test_recorder_reads_images(workspace) -> None:
     image.is_uniform_coords = False
     image.xcoords, image.ycoords = [0.0, 2.0], [1.0, 3.0]
     assert list(comparison_rows(image, "image")) == ["data", "xcoords", "ycoords"]
+
+
+def test_verify_analysis_results(workspace) -> None:
+    """Analysis results are recomputed and compared with the stored ones."""
+    recorder = Recorder(workspace.host(), computation())
+    src = workspace.add(signal([1.0, 2.0, 3.0, 4.0]), 0)
+    pending = recorder.begin(detect, 2.0, src)
+    src.metadata["_detect_"] = {
+        **detect(src, 2.0).to_dict(),
+        "attrs": {"param_json": "{}"},
+    }
+    activity = recorder.complete_analysis(pending, src, "table", "_detect_")
+    activity_id = activity["activity_id"]
+    report = recorder.verify(activity_id, lambda p: p.run())
+    assert report["verdict"] == "exact" and report["reference"] is None
+    (output,) = report["outputs"]
+    assert output["recorded"] == "artifact" and output["status"] == "available"
+    assert output["artifact"] == {"object_uuid": src.uuid, "key": "_detect_"}
+    assert output["observed"]["structure_match"] is True
+    assert report["verification_activity"]["outputs"] == []
+    moved = recorder.verify(activity_id, lambda p: FakeTable(p.run().data * 2))
+    assert moved["verdict"] == "different"
+    assert moved["outputs"][0]["observed"]["mismatches"] == 2
+    absent = recorder.verify(activity_id, lambda p: None)
+    assert absent["verdict"] == "different"
+    src.metadata["_detect_"] = FakeTable([0.0]).to_dict()
+    replaced = recorder.verify(activity_id, lambda p: p.run())
+    assert replaced["verdict"] == "not_verified"
+    assert replaced["outputs"][0]["status"] == "replaced"
+    assert "replaced" in replaced["outputs"][0]["detail"]
+    assert src.metadata["_detect_"] == FakeTable([0.0]).to_dict()  # unchanged
+
+
+def test_execution_without_result(workspace) -> None:
+    """A normal absence of result is recorded and verified, unlike a failure."""
+    recorder = Recorder(workspace.host(), computation())
+    src = workspace.add(signal([1.0, 2.0, 3.0, 4.0]), 0)
+    pending = recorder.begin(detect, -1.0, src, command_id=UUIDS[18])
+    assert detect(src, -1.0) is None
+    activity = recorder.complete_without_result(pending)
+    assert activity["outputs"] == [] and activity["command_id"] == UUIDS[18]
+    assert recorder.complete_without_result(None) is None
+    report = recorder.verify(activity["activity_id"], lambda p: p.run())
+    assert report["verdict"] == "exact"
+    assert report["outputs"][0]["recorded"] == "none"
+    produced = recorder.verify(activity["activity_id"], lambda p: FakeTable([1.0]))
+    assert produced["verdict"] == "different"
+    assert "recorded none" in produced["outputs"][0]["detail"]
+    with recorder.deferred("history_replay"):
+        pending = recorder.begin(detect, -1.0, src)
+        held = recorder.complete_without_result(pending)
+    assert held["origin"] == "history_replay"
