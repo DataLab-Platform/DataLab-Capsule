@@ -1,6 +1,6 @@
 # Decision 0001: foundations of the processing chain
 
-- Status: accepted for profile 0.1 (experimental)
+- Status: accepted for profile 0.1 (experimental); points 4 and 5 and the replay limits superseded by [decision 0002](0002-generic-contracts-and-generalized-replay.md)
 - Date: 11 October 2026
 - Scope: DataLab Desktop, DataLab-Web and DataLab-Capsule
 
