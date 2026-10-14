@@ -118,11 +118,11 @@ class Computation:
 
     Attributes:
         describe_call: ``(func, inputs, param, *, roles=None, contract=...) ->
-         description`` (see ``sigima.proc.execution.describe_call``).
+         description`` (see ``sigima.proc.contracts.describe_call``).
         get_contract: ``(operation_id, contract_version) -> contract``; raises
          when the operation or the version is unknown.
         prepare_execution: ``(contract, inputs, *, values, context) -> prepared``
-         (see ``sigima.proc.execution.prepare_execution``).
+         (see ``sigima.proc.contracts.prepare_execution``).
         normalize_outputs: ``(contract, result) -> [(role, value)]``.
         eligibility_code: Eligibility code of an error raised by the functions
          above, or None for an unexpected error.
@@ -147,12 +147,12 @@ class Computation:
     artifact_value: Callable[[Any], Any] = lambda result: result.to_dict()
 
 
-def computation_from_sigima(execution: Any, contracts: Any) -> Computation:
-    """Return the :class:`Computation` of Sigima, from its modules.
+def computation_from_sigima(contracts: Any) -> Computation:
+    """Return the :class:`Computation` of Sigima, from its contracts package.
 
-    The modules are passed by the application (``sigima.proc.execution`` and
-    ``sigima.proc.contracts``); they are used by attribute, never imported here.
-    This is the only place where Sigima errors are mapped to eligibility codes.
+    The package ``sigima.proc.contracts`` is passed by the application; it is
+    used by attribute, never imported here. This is the only place where Sigima
+    errors are mapped to eligibility codes.
     """
     execution_codes = {
         "invalid_parameters": "invalid_parameters",
@@ -169,15 +169,15 @@ def computation_from_sigima(execution: Any, contracts: Any) -> Computation:
             return "invalid_parameters"
         if isinstance(exc, contracts.XAlignmentError):
             return "unsupported_context"
-        if isinstance(exc, execution.ExecutionError):
+        if isinstance(exc, contracts.ExecutionError):
             return execution_codes.get(exc.code)
         return None
 
     return Computation(
-        describe_call=execution.describe_call,
+        describe_call=contracts.describe_call,
         get_contract=contracts.get_operation_contract,
-        prepare_execution=execution.prepare_execution,
-        normalize_outputs=execution.normalize_outputs,
+        prepare_execution=contracts.prepare_execution,
+        normalize_outputs=contracts.normalize_outputs,
         eligibility_code=eligibility_code,
         comparison_rule=lambda contract: (
             None if contract.comparison is None else contract.comparison.to_dict()
