@@ -95,6 +95,11 @@ class FakeTable:
         }
 
 
+def gain(src, factor):
+    """Fake operation reading a metadata value of its input ("gain")."""
+    return signal(src.y * factor * src.metadata["gain"], x=src.x)
+
+
 def detect(src, threshold):
     """Fake analysis with an optional output: positions above a threshold."""
     found = src.x[src.y > threshold]
@@ -105,12 +110,18 @@ CONTRACTS = {
     ("test.scale", 1): FakeContract(scale),
     ("test.shift", 1): FakeContract(shift, qualified=False),
     ("test.detect", 1): FakeContract(detect),
+    ("test.gain", 1): FakeContract(gain),
 }
 
 
 def describe_call(func, inputs, param, *, roles=None, contract=...):
     """Fake description of a call."""
-    known = {scale: "test.scale", shift: "test.shift", detect: "test.detect"}
+    known = {
+        scale: "test.scale",
+        shift: "test.shift",
+        detect: "test.detect",
+        gain: "test.gain",
+    }
     identified = contract is ... and func in known
     return {
         "operation": {"id": known[func], "contract_version": 1} if identified else None,
@@ -127,6 +138,9 @@ def describe_call(func, inputs, param, *, roles=None, contract=...):
         "parameters": None if param == "unencodable" else {"factor": param},
         "parameter_codec": 2,
         "options": {"o": False} if func is shift else {},
+        "metadata_read": (
+            [{"role": "source", "position": 0, "key": "gain"}] if func is gain else []
+        ),
         "limits": ["parameters_not_encoded"] if param == "unencodable" else [],
         "implementation": {"package": "test", "version": "1", "python_name": "x"},
     }
@@ -541,3 +555,33 @@ def test_computation_from_the_sigima_contracts_package() -> None:
     contract = SimpleNamespace(comparison=None, qualification_status="qualified")
     assert computed.comparison_rule(contract) is None
     assert computed.qualification_status(contract) == "qualified"
+
+
+def test_metadata_read_by_the_computation(workspace) -> None:
+    """Metadata read by a computation are recorded and checked before a replay."""
+    recorder = Recorder(workspace.host(), computation())
+    src = workspace.add(signal([1.0, 2.0, 3.0, 4.0]), 0)
+    src.metadata["gain"] = 2.0
+    pending = recorder.begin(gain, 3.0, src)
+    activity = recorder.complete(pending, workspace.add(gain(src, 3.0), 1))
+    (read,) = activity["context"]["metadata"]
+    assert (read["role"], read["position"], read["key"]) == ("source", 0, "gain")
+    assert read["digest"].startswith("sha256:")
+    activity_id = activity["activity_id"]
+    assert recorder.verify(activity_id, lambda p: p.run())["verdict"] == "exact"
+    # The data are unchanged, so the state is the same: the metadata check
+    # tells why the replay is not faithful.
+    src.metadata["gain"] = 5.0
+    changed = recorder.verify(activity_id, lambda p: p.run())
+    assert changed["eligibility"] == "input_changed"
+    assert "'gain' of input 'source'" in changed["reason"]
+    assert [i["status"] for i in changed["inputs"]] == ["changed"]
+    src.metadata["gain"] = 2.0
+    activity["context"].pop("metadata")
+    missing = recorder.verify(activity_id, lambda p: p.run())
+    assert missing["eligibility"] == "unsupported_context"
+    # The value actually used (e.g. converted on a copy) is the one recorded.
+    used = signal([1.0, 2.0, 3.0, 4.0])
+    used.metadata = {"gain": 7.0}
+    pending = recorder.begin(gain, 3.0, src, executed=[used])
+    assert pending.context["metadata"][0]["digest"] != read["digest"]
