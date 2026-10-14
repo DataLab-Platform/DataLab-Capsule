@@ -21,6 +21,7 @@ from datalab_capsule.recorder import (
     Recorder,
     RecorderHost,
     StateUnavailableError,
+    computation_from_sigima,
 )
 from datalab_capsule.replay import Plan, Refusal
 
@@ -487,3 +488,56 @@ def test_execution_without_result(workspace) -> None:
         pending = recorder.begin(detect, -1.0, src)
         held = recorder.complete_without_result(pending)
     assert held["origin"] == "history_replay"
+
+
+def test_computation_from_the_sigima_contracts_package() -> None:
+    """One package gives the functions and the single error mapping."""
+
+    class ContractError(Exception):
+        """Fake base error of the contracts package."""
+
+    errors = {
+        name: type(name, (ContractError,), {})
+        for name in (
+            "UnknownOperationError",
+            "IncompatibleContractError",
+            "InvalidParametersError",
+            "XAlignmentError",
+        )
+    }
+
+    class ExecutionError(ContractError):
+        """Fake execution error with a stable code."""
+
+        def __init__(self, code: str) -> None:
+            super().__init__(code)
+            self.code = code
+
+    package = SimpleNamespace(
+        describe_call=describe_call,
+        get_operation_contract=get_contract,
+        prepare_execution=prepare_execution,
+        normalize_outputs=_normalize_outputs,
+        ExecutionError=ExecutionError,
+        **errors,
+    )
+    computed = computation_from_sigima(package)
+    assert computed.describe_call is describe_call
+    assert computed.get_contract is get_contract
+    assert computed.prepare_execution is prepare_execution
+    codes = {
+        "UnknownOperationError": "unsupported_operation",
+        "IncompatibleContractError": "unsupported_contract",
+        "InvalidParametersError": "invalid_parameters",
+        "XAlignmentError": "unsupported_context",
+    }
+    for name, code in codes.items():
+        assert computed.eligibility_code(errors[name]()) == code
+    assert computed.eligibility_code(ExecutionError("input_mismatch")) == (
+        "unsupported_context"
+    )
+    assert computed.eligibility_code(ExecutionError("unexpected_output")) is None
+    assert computed.eligibility_code(ValueError()) is None
+    contract = SimpleNamespace(comparison=None, qualification_status="qualified")
+    assert computed.comparison_rule(contract) is None
+    assert computed.qualification_status(contract) == "qualified"
