@@ -148,6 +148,13 @@ def build() -> dict[str, bytes]:
             name=f"Two-input differences ({edition})",
             description="A - B and B - A on different X grids (recorded alignment).",
         )
+        out[f"valid/families-{edition}.dlcapsule"] = _capsule(
+            SOURCES / f"families_{edition}.h5",
+            name=f"Families of operations ({edition})",
+            description="One operation of each family, all identified and "
+            "replayable: lists of inputs, conversions, complex and float32 "
+            "values, seeded noise, analyses, global option, no result.",
+        )
     parent = read_capsule(out["valid/chain-desktop.dlcapsule"]).manifest
     out["valid/chain-renamed.dlcapsule"] = _capsule(
         chain,
@@ -186,7 +193,14 @@ def build() -> dict[str, bytes]:
     )
     difference = read_capsule(out["valid/difference-desktop.dlcapsule"]).manifest
     exact = _report("difference_exact")
-    for name in ("difference_exact", "difference_altered", "legacy_opaque"):
+    for name in (
+        "difference_exact",
+        "difference_altered",
+        "legacy_opaque",
+        "families_convolution",
+        "families_centroid",
+        "families_detection",
+    ):
         out[f"valid/report-{name.replace('_', '-')}.json"] = _json(_report(name))
     candidate = compare_exact({"y": [1.0, 2.0]}, {"y": [0.0, 1.0]})
     out["valid/report-numeric-different.json"] = _json(
