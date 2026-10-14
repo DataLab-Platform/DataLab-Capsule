@@ -3,7 +3,10 @@
 """Comparison rules and verification reports.
 
 The ``exact`` rule requires the same rows, dtype and shape, equal values and NaN
-at the same positions. A missing reference gives the verdict ``not_verified``.
+at the same positions (for complex values, in both parts). A tolerance rule,
+declared by the qualification of an operation contract, also accepts values
+within an absolute and relative tolerance (verdict ``within_tolerance``). A
+missing reference gives the verdict ``not_verified``.
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ __all__ = [
     "build_report",
     "compare_environments",
     "compare_exact",
+    "compare_rows",
     "validate_report",
 ]
 
@@ -42,24 +46,119 @@ class ReportError(ProvenanceError, ValueError):
     """Raised when a verification report is invalid."""
 
 
-def compare_exact(
-    candidate: Mapping[str, Any], reference: Mapping[str, Any]
+def _equal(cand: Any, ref: Any) -> Any:
+    """Return the element-wise equality mask, NaN at the same positions equal.
+
+    Complex values are equal when both their real and imaginary parts are equal
+    or NaN at the same positions.
+    """
+    import numpy as np  # pylint: disable=import-outside-toplevel
+
+    def same(a: Any, b: Any) -> Any:
+        if a.dtype.kind in "fc" and b.dtype.kind in "fc":
+            return (a == b) | (np.isnan(a) & np.isnan(b))
+        return a == b
+
+    if cand.dtype.kind == "c" or ref.dtype.kind == "c":
+        cand_c, ref_c = cand.astype(complex), ref.astype(complex)
+        return same(cand_c.real, ref_c.real) & same(cand_c.imag, ref_c.imag)
+    return same(cand, ref)
+
+
+def _errors(cand: Any, ref: Any) -> tuple[Any, Any, Any]:
+    """Return absolute errors, relative errors and reference magnitudes.
+
+    Errors are computed on the modulus of the difference (complex values keep
+    their imaginary part); they are NaN for non-numeric values.
+    """
+    import numpy as np  # pylint: disable=import-outside-toplevel
+
+    if cand.dtype.kind not in "biufc" or ref.dtype.kind not in "biufc":
+        nan = np.full(ref.shape, np.nan)
+        return nan, nan, nan
+    work = complex if "c" in (cand.dtype.kind, ref.dtype.kind) else float
+    with np.errstate(all="ignore"):
+        magnitude = np.abs(ref.astype(work))
+        abs_err = np.abs(cand.astype(work) - ref.astype(work))
+        rel_err = abs_err / magnitude
+    return abs_err, rel_err, magnitude
+
+
+def _applied_rule(
+    rule: Mapping[str, Any] | None, output: str, environment: str
 ) -> dict[str, Any]:
-    """Compare candidate rows with reference rows under the ``exact`` rule.
+    """Return the rule applied to *output*, in report form.
+
+    Args:
+        rule: Declared comparison rule (``{"rule": "exact"}`` or a tolerance
+         rule with per-output tolerances), or None for the exact rule.
+        output: Output role compared.
+        environment: ``same``, ``different`` or ``unknown`` environment.
+
+    Raises:
+        ValueError: If the declared rule is malformed.
+    """
+    if rule is None or dict(rule) == {"rule": "exact"}:
+        return {"kind": "exact"}
+    if rule.get("rule") != "tolerance" or not isinstance(rule.get("outputs"), Mapping):
+        raise ValueError(f"Invalid comparison rule: {rule!r}")
+    declared = {
+        "declared": dict(rule),
+        "output": output,
+        "environment": environment,
+    }
+    tol = rule["outputs"].get(output)
+    if tol is None or (
+        environment == "same" and rule.get("same_environment") == "exact"
+    ):
+        return {"kind": "exact", **declared}
+    atol, rtol = float(tol["atol"]), float(tol["rtol"])
+    if not (atol >= 0 and rtol >= 0):
+        raise ValueError(f"Invalid tolerance for output {output!r}")
+    return {"kind": "tolerance", "atol": atol, "rtol": rtol, **declared}
+
+
+def compare_rows(
+    candidate: Mapping[str, Any],
+    reference: Mapping[str, Any],
+    rule: Mapping[str, Any] | None = None,
+    *,
+    output: str = "result",
+    environment: str = "unknown",
+) -> dict[str, Any]:
+    """Compare candidate rows with reference rows under a declared rule.
+
+    The rule comes from the qualification of the operation contract, as plain
+    data: ``{"rule": "exact"}`` (the default) or ``{"rule": "tolerance",
+    "outputs": {role: {"atol", "rtol"}}, "same_environment": "exact" |
+    "tolerance", "justification": ...}``. A tolerance applies only to the
+    outputs it names; within the same environment, a rule whose
+    ``same_environment`` is ``exact`` is applied exactly. A value matches when it
+    equals the reference (NaN at the same positions; for complex values, both
+    parts) or, under a tolerance, when ``|c - r| <= atol + rtol * |r|``.
 
     Args:
         candidate: Row name -> array (e.g. ``{"x": ..., "y": ...}``).
         reference: Row name -> array.
+        rule: Declared comparison rule, or None for the exact rule.
+        output: Output role compared (selects the declared tolerance).
+        environment: ``match`` of :func:`compare_environments`.
 
     Returns:
-        ``{"verdict", "rule", "observed"}`` where ``observed`` holds the mismatch
+        ``{"verdict", "rule", "observed"}``: verdict ``exact``,
+        ``within_tolerance`` or ``different``; the applied rule; the mismatch
         count, the maximum absolute and relative errors (None when the error is
-        undefined for at least one mismatch) and the number of mismatches whose
-        absolute or relative error is undefined.
+        undefined for at least one mismatch), the number of mismatches whose
+        error is undefined and, under a tolerance, the number of values out of
+        tolerance.
+
+    Raises:
+        ValueError: If the declared rule is malformed.
     """
     import numpy as np  # pylint: disable=import-outside-toplevel
 
-    rule = {"kind": "exact"}
+    applied = _applied_rule(rule, output, environment)
+    tolerant = applied["kind"] == "tolerance"
     same_rows = list(candidate) == list(reference)
     dtype_match = same_rows and all(
         np.asarray(candidate[k]).dtype == np.asarray(reference[k]).dtype
@@ -79,23 +178,26 @@ def compare_exact(
             "dtype_match": dtype_match,
             "shape_match": shape_match,
         }
-        return {"verdict": "different", "rule": rule, "observed": observed}
-    mismatches = 0
+        return {"verdict": "different", "rule": applied, "observed": observed}
+    mismatches = out_of_tolerance = 0
     abs_errors: list[Any] = []
     rel_errors: list[Any] = []
     for key in reference:
         cand = np.asarray(candidate[key])
         ref = np.asarray(reference[key])
-        both_nan = np.isnan(cand) & np.isnan(ref) if cand.dtype.kind in "fc" else False
-        differ = ~((cand == ref) | both_nan)
+        differ = ~_equal(cand, ref)
         count = int(np.count_nonzero(differ))
         mismatches += count
         if count:
-            with np.errstate(all="ignore"):
-                abs_err = np.abs(cand[differ].astype(float) - ref[differ].astype(float))
-                rel_err = abs_err / np.abs(ref[differ].astype(float))
+            abs_err, rel_err, magnitude = _errors(cand[differ], ref[differ])
             abs_errors.append(abs_err)
             rel_errors.append(rel_err)
+            if tolerant:
+                with np.errstate(invalid="ignore"):
+                    within = np.isfinite(abs_err) & (
+                        abs_err <= applied["atol"] + applied["rtol"] * magnitude
+                    )
+                out_of_tolerance += int(np.count_nonzero(~within))
     # A maximum is given only when the error is defined (finite) for every
     # mismatch (NaN placed differently, infinities or a zero reference leave it
     # undefined); the number of such mismatches is reported.
@@ -117,8 +219,32 @@ def compare_exact(
         "dtype_match": dtype_match,
         "shape_match": shape_match,
     }
-    verdict = "exact" if mismatches == 0 and dtype_match else "different"
-    return {"verdict": verdict, "rule": rule, "observed": observed}
+    if tolerant:
+        observed["out_of_tolerance"] = out_of_tolerance
+    if mismatches == 0 and dtype_match:
+        verdict = "exact"
+    elif tolerant and dtype_match and out_of_tolerance == 0:
+        verdict = "within_tolerance"
+    else:
+        verdict = "different"
+    return {"verdict": verdict, "rule": applied, "observed": observed}
+
+
+def compare_exact(
+    candidate: Mapping[str, Any], reference: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Compare candidate rows with reference rows under the ``exact`` rule.
+
+    Same as :func:`compare_rows` without a declared rule.
+
+    Args:
+        candidate: Row name -> array (e.g. ``{"x": ..., "y": ...}``).
+        reference: Row name -> array.
+
+    Returns:
+        ``{"verdict", "rule", "observed"}``.
+    """
+    return compare_rows(candidate, reference)
 
 
 def _flatten(record: Mapping[str, Any], prefix: str = "") -> dict[str, Any]:

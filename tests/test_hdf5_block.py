@@ -178,6 +178,52 @@ def test_images_and_uncertainties_are_located() -> None:
         assert load_ledger(h5file)[1] == {states[nonuniform]: "altered"}
 
 
+def test_float32_and_complex_states_are_located() -> None:
+    """Float32 and complex signals and complex images match their saved rows.
+
+    Sigima stores signal rows in one ``xydata`` array of the value dtype and
+    exposes ``x`` as real float64: both give the same fingerprint record.
+    """
+    ids = [f"00000000-0000-4000-8000-00000000002{i}" for i in range(4)]
+    x = np.array([0.0, 0.5, 1.0, 1.5])
+    stored = {
+        ids[0]: np.vstack([x, [1.0, 2.0, 3.0, 4.0]]).astype(np.float32),
+        ids[1]: np.vstack([x, [1j, 2.0, 3 - 1j, 4.0]]).astype(np.complex128),
+        ids[2]: np.vstack(
+            [x, [1j, 2.0, 3.0, 4.0], np.full(4, np.nan), np.full(4, 0.5)]
+        ).astype(np.complex64),
+    }
+    data = (np.arange(6).reshape(2, 3) * (1 - 2j)).astype(np.complex128)
+    ledger = Ledger()
+    states = {}
+    for object_uuid, xydata in stored.items():
+        dy = xydata[3] if xydata.shape[0] == 4 else None
+        live = signal(
+            [0.0] * 4, x=xydata[0].real.astype(float), xunit="s", yunit="V", dy=dy
+        )
+        live.y = xydata[1]
+        facts = signal_state_facts(live)
+        assert facts["fingerprint"]["scheme"] == "datalab-signal-v2"
+        states[object_uuid] = ledger.observe(object_uuid, facts)
+    states[ids[3]] = ledger.observe(ids[3], state_facts(image(data)))
+    with _memory_file() as h5file:
+        for index, (object_uuid, xydata) in enumerate(stored.items()):
+            group = h5file.create_group(f"/DataLab_Sig/g: G/s{index}: S")
+            group.attrs["xunit"], group.attrs["yunit"] = "s", "V"
+            group["xydata"] = xydata
+            group.create_group("metadata").attrs["__uuid"] = object_uuid
+        _write_image(h5file, "/DataLab_Ima/g: G/i: I", data, ids[3])
+        assert set(locate_current_states(h5file, ledger)) == set(states.values())
+        save_ledger(h5file, ledger)
+        assert load_ledger(h5file)[1] == {}
+        h5file["/DataLab_Sig/g: G/s1: S/xydata"][1, 0] = -1j
+        h5file["/DataLab_Ima/g: G/i: I/data"][0, 1] = 1 + 2j
+        assert load_ledger(h5file)[1] == {
+            states[ids[1]]: "altered",
+            states[ids[3]]: "altered",
+        }
+
+
 def test_absent_block() -> None:
     """A file without the block reports provenance as absent."""
     with _memory_file() as h5file:

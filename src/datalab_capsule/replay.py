@@ -173,6 +173,15 @@ def prepare_activity(
         if facts["fingerprint"] != recorded:
             entry["status"] = "changed"
             return refuse("input_changed", "Input changed since the activity", checked)
+        # A state is the same only when its ROI (or the absence of one) matches.
+        recorded_roi = (ledger.states[state_id].get("roi") or {}).get("digest")
+        if (facts.get("roi") or {}).get("digest") != recorded_roi:
+            entry["status"] = "changed"
+            return refuse(
+                "input_changed",
+                "Input region of interest changed since the activity",
+                checked,
+            )
     live = [obj for _r, _s, obj in objects]
     call_inputs = live
     if apply_context is not None:

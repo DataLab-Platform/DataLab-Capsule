@@ -13,6 +13,7 @@ from datalab_capsule.compare import (
     build_report,
     compare_environments,
     compare_exact,
+    compare_rows,
 )
 from datalab_capsule.environment import collect_environment, environment_id
 from datalab_capsule.integrity import signal_state_facts
@@ -272,3 +273,111 @@ def test_prepare_altered_and_opaque() -> None:
         "opaque",
         "unsupported_operation",
     )
+
+
+@pytest.mark.parametrize(
+    ("recorded", "live", "ready"),
+    [
+        (None, None, True),
+        (ROI([0.0, 0.5]), ROI([0.0, 0.5]), True),
+        (None, ROI([0.0, 0.5]), False),
+        (ROI([0.0, 0.5]), None, False),
+        (ROI([0.0, 0.5]), ROI([0.0, 0.75]), False),
+        (ROI([0.0, 0.5]), ROI([0.0, 0.5], kind="RectangularROI"), False),
+    ],
+)
+def test_prepare_checks_the_input_roi(recorded, live, ready) -> None:
+    """An input whose ROI was added, removed or changed is refused."""
+    ledger = Ledger()
+    values = [-2.0, 0.0, 1.0, 4.0]
+    state = ledger.observe(SRC_UUID, signal_state_facts(signal(values, roi=recorded)))
+    act = ledger.record_activity(
+        call=make_call(
+            "sigima.signal.normalize", 1, {"method": "maximum"}, [("source", state)]
+        ),
+        outputs=[("result", DST_UUID, signal_state_facts(signal([-0.5, 0, 0.25, 1])))],
+        environment=collect_environment("desktop", "1.4.0", packages=()),
+        edition="desktop",
+        origin="ordinary",
+    )
+    result = _prepare(
+        ledger,
+        act["activity_id"],
+        {SRC_UUID: signal(values, roi=live)},
+        check_preconditions=lambda c, objs: None,
+    )
+    if ready:
+        assert isinstance(result, Plan)
+    else:
+        assert isinstance(result, Refusal)
+        assert result.eligibility == "input_changed"
+        assert "region of interest" in result.reason
+        assert [i["status"] for i in result.input_statuses] == ["changed"]
+
+
+def test_compare_complex_keeps_the_imaginary_part() -> None:
+    """Complex rows are compared on both parts; errors use the modulus."""
+    ref = {"y": np.array([1 + 1j, 2 - 1j, complex(np.nan, 1.0)])}
+    assert compare_exact(ref, ref)["verdict"] == "exact"
+    conj = {"y": np.array([1 - 1j, 2 - 1j, complex(np.nan, 1.0)])}
+    result = compare_rows(conj, ref)
+    assert result["verdict"] == "different"
+    assert result["observed"]["mismatches"] == 1
+    assert result["observed"]["max_abs_error"] == 2.0
+    moved = {"y": np.array([1 + 1j, 2 - 1j, complex(1.0, np.nan)])}
+    observed = compare_rows(moved, ref)["observed"]
+    assert observed["mismatches"] == 1 and observed["max_abs_error"] is None
+    real = {"y": ref["y"].real}
+    assert compare_rows(real, ref)["verdict"] == "different"
+
+
+TOLERANCE = {
+    "rule": "tolerance",
+    "outputs": {"result": {"atol": 1e-12, "rtol": 1e-9}},
+    "same_environment": "exact",
+    "justification": "FFT rounding differs across NumPy versions",
+}
+
+
+def test_compare_rows_with_a_declared_tolerance() -> None:
+    """A declared tolerance gives within_tolerance across environments only."""
+    ref = {"x": np.array([0.0, 1.0]), "y": np.array([1.0, 1j])}
+    close = {"x": ref["x"], "y": ref["y"] + 1e-13}
+    result = compare_rows(close, ref, TOLERANCE, environment="different")
+    assert result["verdict"] == "within_tolerance"
+    assert result["rule"]["kind"] == "tolerance"
+    assert (result["rule"]["atol"], result["rule"]["rtol"]) == (1e-12, 1e-9)
+    assert result["rule"]["declared"] == TOLERANCE
+    assert result["observed"]["out_of_tolerance"] == 0
+    assert result["observed"]["mismatches"] == 2
+    same = compare_rows(close, ref, TOLERANCE, environment="same")
+    assert same["verdict"] == "different" and same["rule"]["kind"] == "exact"
+    assert compare_rows(ref, ref, TOLERANCE, environment="different")["verdict"] == (
+        "exact"
+    )
+    far = {"x": ref["x"], "y": ref["y"] + 1e-6}
+    result = compare_rows(far, ref, TOLERANCE, environment="unknown")
+    assert result["verdict"] == "different"
+    assert result["observed"]["out_of_tolerance"] == 2
+    nan = {"x": ref["x"], "y": np.array([np.nan, 1j])}
+    assert compare_rows(nan, ref, TOLERANCE)["verdict"] == "different"
+    other_output = compare_rows(close, ref, TOLERANCE, output="mask")
+    assert other_output["rule"]["kind"] == "exact"
+    assert other_output["verdict"] == "different"
+    assert compare_rows(ref, ref, {"rule": "exact"})["rule"] == {"kind": "exact"}
+    for bad in ({"rule": "close"}, {"rule": "tolerance", "outputs": None}):
+        with pytest.raises(ValueError):
+            compare_rows(ref, ref, bad)
+    env = compare_environments(None, None, None, None)
+    report = build_report(
+        activity_id="a",
+        restoration="replayable",
+        eligibility="ready",
+        inputs=[],
+        reference={"state_id": "s", "status": "available"},
+        environment=env,
+        comparison=compare_rows(close, ref, TOLERANCE, environment=env["match"]),
+        candidate_state_ids=[("result", "c")],
+    )
+    assert report["verdict"] == "within_tolerance"
+    assert report["rule"]["declared"]["justification"] == TOLERANCE["justification"]

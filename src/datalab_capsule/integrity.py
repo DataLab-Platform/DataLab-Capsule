@@ -2,9 +2,11 @@
 
 """Integrity primitives: RFC 8785 canonical JSON, digests and state fingerprints.
 
-The ``datalab-signal-v1`` and ``datalab-image-v1`` fingerprints cover the
-scientific content of a signal or an image (dtype, shape, rows or coordinates,
-units), never its title, colours or display identifiers.
+The ``datalab-signal-v1``, ``datalab-signal-v2`` and ``datalab-image-v1``
+fingerprints cover the scientific content of a signal or an image (dtypes,
+shape, rows or coordinates, units), never its title, colours or display
+identifiers. ``datalab-signal-v2`` covers signals whose rows differ in dtype
+(float32 or complex values on a float64 X row).
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ __all__ = [
     "IMAGE_FINGERPRINT_SCHEME",
     "MAX_JSON_DEPTH",
     "SIGNAL_FINGERPRINT_SCHEME",
+    "SIGNAL_FINGERPRINT_SCHEME_V2",
     "CanonicalJSONError",
     "ProvenanceError",
     "canonical_json",
@@ -31,12 +34,16 @@ __all__ = [
     "roi_facts",
     "sha256_digest",
     "signal_fingerprint",
+    "signal_fingerprint_record",
+    "signal_fingerprint_v2",
+    "signal_rows",
     "signal_state_facts",
     "state_facts",
     "value_digest",
 ]
 
 SIGNAL_FINGERPRINT_SCHEME = "datalab-signal-v1"
+SIGNAL_FINGERPRINT_SCHEME_V2 = "datalab-signal-v2"
 IMAGE_FINGERPRINT_SCHEME = "datalab-image-v1"
 #: Deepest nesting of objects and arrays accepted in JSON read from a file;
 #: capsule data nest less than 15 levels.
@@ -254,6 +261,47 @@ def _present_uncertainty(row: Any) -> bool:
     return True
 
 
+def signal_rows(
+    x: Any, y: Any, dx: Any = None, dy: Any = None
+) -> list[tuple[str, Any]]:
+    """Return the scientific rows of a signal, as covered by its fingerprint.
+
+    Coordinate rows (``x`` and ``dx``) are real numbers: their real part, as
+    float64. Value rows (``y`` and ``dy``) keep their dtype (e.g. float32 or
+    complex). Uncertainty rows are kept only when present and not all NaN. The
+    same rows are obtained from a Sigima object and from its HDF5 ``xydata``.
+
+    Returns:
+        Ordered ``(name, array)`` pairs.
+    """
+    import numpy as np  # pylint: disable=import-outside-toplevel
+
+    def coordinate(row: Any) -> Any:
+        return np.asarray(row).real.astype(np.float64, copy=False)
+
+    rows = [("x", coordinate(x)), ("y", np.asarray(y))]
+    if _present_uncertainty(dx):
+        rows.append(("dx", coordinate(dx)))
+    if _present_uncertainty(dy):
+        rows.append(("dy", np.asarray(dy)))
+    return rows
+
+
+def _check_signal_rows(rows: list[tuple[str, Any]]) -> int:
+    """Return the common length of signal rows.
+
+    Raises:
+        ValueError: If rows are not 1-D numeric arrays of equal length.
+    """
+    length = rows[0][1].shape[0] if rows[0][1].ndim == 1 else -1
+    for _name, row in rows:
+        if row.ndim != 1 or row.shape[0] != length:
+            raise ValueError("Signal rows must be 1-D arrays of equal length")
+        if row.dtype.kind not in "biufc":
+            raise ValueError(f"Unsupported signal dtype: {row.dtype}")
+    return length
+
+
 def signal_fingerprint(
     x: Any,
     y: Any,
@@ -276,7 +324,9 @@ def signal_fingerprint(
         ``"sha256:<hex>"`` digest.
 
     Raises:
-        ValueError: If rows are not 1-D, differ in length or in dtype.
+        ValueError: If rows are not 1-D, differ in length or in dtype (see
+         :func:`signal_fingerprint_record` for signals whose rows differ in
+         dtype).
     """
     import numpy as np  # pylint: disable=import-outside-toplevel
 
@@ -306,14 +356,81 @@ def signal_fingerprint(
     return "sha256:" + hasher.hexdigest()
 
 
+def signal_fingerprint_v2(
+    x: Any,
+    y: Any,
+    dx: Any = None,
+    dy: Any = None,
+    xunit: str | None = "",
+    yunit: str | None = "",
+) -> str:
+    """Return the ``datalab-signal-v2`` fingerprint of a signal.
+
+    The rows are those of :func:`signal_rows`, each with its own dtype. The
+    payload is the canonical JSON descriptor (scheme, length, rows with their
+    names and little-endian dtypes, units), a NUL byte, then each row in its own
+    dtype as little-endian bytes.
+
+    Raises:
+        ValueError: If rows are not 1-D numeric arrays of equal length.
+    """
+    rows = signal_rows(x, y, dx, dy)
+    length = _check_signal_rows(rows)
+    descriptor = {
+        "scheme": SIGNAL_FINGERPRINT_SCHEME_V2,
+        "length": length,
+        "rows": [
+            {"name": name, "dtype": row.dtype.newbyteorder("<").str}
+            for name, row in rows
+        ],
+        "units": {"x": xunit or "", "y": yunit or ""},
+    }
+    hasher = hashlib.sha256(canonical_json_bytes(descriptor) + b"\x00")
+    for _name, row in rows:
+        _hash_rows(hasher, row, row.dtype)
+    return "sha256:" + hasher.hexdigest()
+
+
+def signal_fingerprint_record(
+    x: Any,
+    y: Any,
+    dx: Any = None,
+    dy: Any = None,
+    xunit: str | None = "",
+    yunit: str | None = "",
+) -> dict[str, str]:
+    """Return the fingerprint record of a signal: ``{"scheme", "value"}``.
+
+    The scheme is chosen from the content alone, so that an object and its HDF5
+    serialisation get the same record: ``datalab-signal-v1`` when the rows of
+    :func:`signal_rows` share one dtype (e.g. float64 signals),
+    ``datalab-signal-v2`` otherwise (e.g. float32 or complex values, whose X row
+    is float64).
+
+    Raises:
+        ValueError: If rows are not 1-D numeric arrays of equal length.
+    """
+    rows = signal_rows(x, y, dx, dy)
+    _check_signal_rows(rows)
+    by_name = dict(rows)
+    args = (by_name["x"], by_name["y"], by_name.get("dx"), by_name.get("dy"))
+    dtypes = {row.dtype.newbyteorder("<") for _name, row in rows}
+    if len(dtypes) == 1:
+        scheme = SIGNAL_FINGERPRINT_SCHEME
+        value = signal_fingerprint(*args, xunit, yunit)
+    else:
+        scheme = SIGNAL_FINGERPRINT_SCHEME_V2
+        value = signal_fingerprint_v2(*args, xunit, yunit)
+    return {"scheme": scheme, "value": value}
+
+
 def signal_state_facts(obj: Any) -> dict[str, Any]:
     """Return the state facts of a signal-like object (duck-typed).
 
     The object must expose ``x``, ``y``, ``dx``, ``dy``, ``xunit``, ``yunit``
     and ``roi``, as Sigima's ``SignalObj`` does. Uncertainty rows are part of the
-    fingerprint; an ROI is recorded under ``roi`` (see :func:`roi_facts`). A
-    complex signal gets a ``None`` fingerprint and the reason is listed in
-    ``limits``.
+    fingerprint (see :func:`signal_fingerprint_record`); an ROI is recorded under
+    ``roi`` (see :func:`roi_facts`).
 
     Args:
         obj: Signal-like object.
@@ -323,40 +440,25 @@ def signal_state_facts(obj: Any) -> dict[str, Any]:
         ``rows``, ``units`` and ``limits`` keys, and ``roi`` when the object
         has one.
     """
-    import numpy as np  # pylint: disable=import-outside-toplevel
-
-    x, y = np.asarray(obj.x), np.asarray(obj.y)
-    rows = ["x", "y"]
-    limits = []
-    dx, dy = getattr(obj, "dx", None), getattr(obj, "dy", None)
-    if _present_uncertainty(dx):
-        rows.append("dx")
-    if _present_uncertainty(dy):
-        rows.append("dy")
-    if y.dtype.kind == "c" or x.dtype.kind == "c":
-        limits.append("complex_dtype")
+    rows = signal_rows(obj.x, obj.y, getattr(obj, "dx", None), getattr(obj, "dy", None))
+    by_name = dict(rows)
     units = {"x": obj.xunit or "", "y": obj.yunit or ""}
-    fingerprint = None
-    if not limits:
-        fingerprint = {
-            "scheme": SIGNAL_FINGERPRINT_SCHEME,
-            "value": signal_fingerprint(
-                x,
-                y,
-                dx if "dx" in rows else None,
-                dy if "dy" in rows else None,
-                units["x"],
-                units["y"],
-            ),
-        }
+    fingerprint = signal_fingerprint_record(
+        by_name["x"],
+        by_name["y"],
+        by_name.get("dx"),
+        by_name.get("dy"),
+        units["x"],
+        units["y"],
+    )
     facts = {
         "kind": "signal",
         "fingerprint": fingerprint,
-        "dtype": y.dtype.name,
-        "length": int(y.shape[0]),
-        "rows": rows,
+        "dtype": by_name["y"].dtype.name,
+        "length": int(by_name["y"].shape[0]),
+        "rows": [name for name, _row in rows],
         "units": units,
-        "limits": limits,
+        "limits": [],
     }
     roi = roi_facts(getattr(obj, "roi", None))
     if roi is not None:
@@ -489,26 +591,23 @@ def image_state_facts(obj: Any) -> dict[str, Any]:
 
     The object must expose ``data``, ``is_uniform_coords``, ``x0``, ``y0``,
     ``dx``, ``dy``, ``xcoords``, ``ycoords``, ``xunit``, ``yunit``, ``zunit``
-    and ``roi``, as Sigima's ``ImageObj`` does. A complex image gets a ``None``
-    fingerprint and the reason is listed in ``limits``.
+    and ``roi``, as Sigima's ``ImageObj`` does. Every numeric dtype is covered,
+    complex included.
     """
     import numpy as np  # pylint: disable=import-outside-toplevel
 
     data = np.asarray(obj.data)
     units = {"x": obj.xunit or "", "y": obj.yunit or "", "z": obj.zunit or ""}
-    limits = ["complex_dtype"] if data.dtype.kind == "c" else []
-    fingerprint = None
-    if not limits:
-        if obj.is_uniform_coords:
-            coords = {"x0": obj.x0, "y0": obj.y0, "dx": obj.dx, "dy": obj.dy}
-        else:
-            coords = {"xcoords": obj.xcoords, "ycoords": obj.ycoords}
-        fingerprint = {
-            "scheme": IMAGE_FINGERPRINT_SCHEME,
-            "value": image_fingerprint(
-                data, xunit=units["x"], yunit=units["y"], zunit=units["z"], **coords
-            ),
-        }
+    if obj.is_uniform_coords:
+        coords = {"x0": obj.x0, "y0": obj.y0, "dx": obj.dx, "dy": obj.dy}
+    else:
+        coords = {"xcoords": obj.xcoords, "ycoords": obj.ycoords}
+    fingerprint = {
+        "scheme": IMAGE_FINGERPRINT_SCHEME,
+        "value": image_fingerprint(
+            data, xunit=units["x"], yunit=units["y"], zunit=units["z"], **coords
+        ),
+    }
     facts = {
         "kind": "image",
         "fingerprint": fingerprint,
@@ -516,7 +615,7 @@ def image_state_facts(obj: Any) -> dict[str, Any]:
         "shape": [int(n) for n in data.shape],
         "rows": ["data"],
         "units": units,
-        "limits": limits,
+        "limits": [],
     }
     roi = roi_facts(getattr(obj, "roi", None))
     if roi is not None:

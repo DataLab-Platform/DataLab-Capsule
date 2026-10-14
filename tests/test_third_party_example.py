@@ -11,10 +11,14 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import io
 from pathlib import Path
 
+import h5py
+import numpy as np
 import pytest
 
+from datalab_capsule.integrity import image_fingerprint, signal_fingerprint_record
 from datalab_capsule.verify import verify_capsule
 
 from .corpus import CORPUS
@@ -87,3 +91,35 @@ def test_example_detects_defects() -> None:
     assert altered["manifest_ok"] and altered["workspace"] == "ok"
     assert list(altered["states"].values()).count(False) == 1
     assert example.main([str(CORPUS / "invalid" / "altered-state.dlcapsule")]) == 1
+
+
+@pytest.mark.parametrize(
+    "dtype", [np.float64, np.float32, np.complex128, np.complex64, np.float16]
+)
+def test_example_signal_fingerprints_match_the_library(dtype) -> None:
+    """Signals whose rows differ in dtype (``datalab-signal-v2``) are read alike."""
+    x = np.array([0.0, 0.5, 1.0, 1.5])
+    y = np.array([1.0, -2.0, 3.5, 0.25]) * (
+        1 - 1j if np.dtype(dtype).kind == "c" else 1
+    )
+    xydata = np.vstack([x, y, np.full(4, np.nan), np.full(4, 0.125)]).astype(dtype)
+    with h5py.File(io.BytesIO(), "w") as h5file:
+        node = h5file.create_group("s")
+        node.attrs["xunit"], node.attrs["yunit"] = "s", "V"
+        node["xydata"] = xydata
+        found = _example().signal_fingerprint(node)
+    expected = signal_fingerprint_record(*xydata, "s", "V")
+    assert found == expected["value"]
+    v1 = np.dtype(dtype) == np.float64
+    assert expected["scheme"] == ("datalab-signal-v1" if v1 else "datalab-signal-v2")
+
+
+def test_example_complex_image_fingerprint_matches_the_library() -> None:
+    """Complex images keep the ``datalab-image-v1`` scheme."""
+    data = (np.arange(6).reshape(2, 3) * (1 + 0.5j)).astype(np.complex64)
+    with h5py.File(io.BytesIO(), "w") as h5file:
+        node = h5file.create_group("i")
+        node.attrs.update({"xunit": "mm", "yunit": "mm", "zunit": ""})
+        node["data"] = data
+        found = _example().image_fingerprint(node)
+    assert found == image_fingerprint(data, xunit="mm", yunit="mm")

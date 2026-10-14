@@ -19,6 +19,7 @@ from datalab_capsule.integrity import (
     image_fingerprint,
     json_digest,
     signal_fingerprint,
+    signal_fingerprint_record,
 )
 
 
@@ -60,14 +61,30 @@ def run(vectors_path: str) -> list[str]:
         )
         if got != case["expected"]:
             failures.append(f"fingerprint {case['name']}: {got}")
+    for case in doc.get("signal_records", []):
+        y = np.array(case["y"], dtype=np.float64)
+        if "y_imag" in case:
+            y = y + 1j * np.array(case["y_imag"], dtype=np.float64)
+        dy = np.array(case["dy"], dtype=case["dtype"]) if "dy" in case else None
+        got = signal_fingerprint_record(
+            np.array(case["x"], dtype=np.float64),
+            y.astype(case["dtype"]),
+            None,
+            dy,
+            case["units"]["x"],
+            case["units"]["y"],
+        )
+        if got != case["expected"]:
+            failures.append(f"signal record {case['name']}: {got}")
     for case in doc.get("image_fingerprints", []):
         coords = {
             k: np.array(v, dtype=np.float64) if isinstance(v, list) else v
             for k, v in case["coords"].items()
         }
-        got = image_fingerprint(
-            np.array(case["data"], dtype=case["dtype"]), **coords, **case["units"]
-        )
+        data = np.array(case["data"], dtype=np.float64)
+        if "data_imag" in case:
+            data = data + 1j * np.array(case["data_imag"], dtype=np.float64)
+        got = image_fingerprint(data.astype(case["dtype"]), **coords, **case["units"])
         if got != case["expected"]:
             failures.append(f"image fingerprint {case['name']}: {got}")
     for case in doc["digests"]:

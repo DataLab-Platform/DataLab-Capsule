@@ -25,7 +25,7 @@ from datalab_capsule.integrity import (
     ProvenanceError,
     image_fingerprint,
     load_json,
-    signal_fingerprint,
+    signal_fingerprint_record,
     value_digest,
 )
 from datalab_capsule.ledger import Ledger, LedgerError
@@ -412,14 +412,20 @@ def locate_fingerprints(
                 ) from exc
             continue
         signal = read_signal(h5file, locator["path"])
-        result[state_id] = signal_fingerprint(
-            signal["x"],
-            signal["y"],
-            signal["dx"],
-            signal["dy"],
-            signal["xunit"],
-            signal["yunit"],
-        )
+        try:
+            record = signal_fingerprint_record(
+                signal["x"],
+                signal["y"],
+                signal["dx"],
+                signal["dy"],
+                signal["xunit"],
+                signal["yunit"],
+            )
+        except ValueError as exc:
+            raise ProvenanceFormatError(
+                f"Invalid signal {locator['path']}: {exc}"
+            ) from exc
+        result[state_id] = record["value"]
     return result
 
 

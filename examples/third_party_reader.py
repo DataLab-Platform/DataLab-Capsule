@@ -9,7 +9,7 @@ It checks, without computing anything:
 1. the manifest fingerprint (SHA-256 of the RFC 8785 canonical JSON);
 2. the SHA-256 and size of the workspace (included, or given as a file);
 3. the fingerprint of every state stored in the workspace
-   (``datalab-signal-v1``, ``datalab-image-v1``);
+   (``datalab-signal-v1``, ``datalab-signal-v2``, ``datalab-image-v1``);
 
 then prints the activities with their roles and parameters.
 
@@ -104,23 +104,41 @@ def _le(array, dtype) -> bytes:
 
 
 def signal_fingerprint(node) -> str:
-    """``datalab-signal-v1``: rows x, y (and dx, dy unless absent or all NaN)."""
+    """``datalab-signal-v1`` or ``-v2``: rows x, y (and dx, dy unless all NaN).
+
+    The X and dX rows are real numbers (real part, as float64); the Y and dY
+    rows keep the stored dtype. When all rows share one dtype the scheme is
+    ``datalab-signal-v1``, otherwise ``datalab-signal-v2`` (one dtype per row).
+    """
     data = node["xydata"][()]
-    names, rows = ["x", "y"], [data[0], data[1]]
+    names = ["x", "y"]
+    rows = [data[0].real.astype(np.float64), data[1]]
     for index, name in ((2, "dx"), (3, "dy")):
         if data.shape[0] > index and not np.all(np.isnan(data[index])):
             names.append(name)
-            rows.append(data[index])
-    dtype = data.dtype.newbyteorder("<")
-    descriptor = {
-        "scheme": "datalab-signal-v1",
-        "dtype": dtype.str,
-        "length": int(data.shape[1]),
-        "rows": names,
-        "units": {"x": _text(node, "xunit"), "y": _text(node, "yunit")},
-    }
+            row = data[index]
+            rows.append(row.real.astype(np.float64) if name == "dx" else row)
+    dtypes = [row.dtype.newbyteorder("<") for row in rows]
+    units = {"x": _text(node, "xunit"), "y": _text(node, "yunit")}
+    if len(set(dtypes)) == 1:
+        descriptor = {
+            "scheme": "datalab-signal-v1",
+            "dtype": dtypes[0].str,
+            "length": int(data.shape[1]),
+            "rows": names,
+            "units": units,
+        }
+    else:
+        descriptor = {
+            "scheme": "datalab-signal-v2",
+            "length": int(data.shape[1]),
+            "rows": [{"name": n, "dtype": d.str} for n, d in zip(names, dtypes)],
+            "units": units,
+        }
     payload = canonical(descriptor).encode("utf-8") + b"\x00"
-    return sha256(payload + b"".join(_le(row, dtype) for row in rows))
+    return sha256(
+        payload + b"".join(_le(row, dtype) for row, dtype in zip(rows, dtypes))
+    )
 
 
 def image_fingerprint(node) -> str:
