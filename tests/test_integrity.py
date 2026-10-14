@@ -21,6 +21,8 @@ from datalab_capsule.integrity import (
     image_state_facts,
     json_digest,
     signal_fingerprint,
+    signal_fingerprint_record,
+    signal_fingerprint_v2,
     signal_state_facts,
     state_facts,
 )
@@ -112,7 +114,7 @@ def _signal(**kwargs) -> SimpleNamespace:
 
 
 def test_signal_state_facts() -> None:
-    """Uncertainty rows are fingerprinted, ROI recorded, complex refused."""
+    """Uncertainty rows are fingerprinted, ROI recorded, complex covered by v2."""
     facts = signal_state_facts(_signal())
     assert facts["fingerprint"] == {
         "scheme": "datalab-signal-v1",
@@ -137,7 +139,58 @@ def test_signal_state_facts() -> None:
     )
     assert facts["fingerprint"]["value"] != SIGNAL_FINGERPRINT
     complex_y = np.array([1j, 0, 0, 0])
-    assert signal_state_facts(_signal(y=complex_y))["limits"] == ["complex_dtype"]
+    complex_facts = signal_state_facts(_signal(y=complex_y))
+    assert complex_facts["limits"] == [] and complex_facts["dtype"] == "complex128"
+    assert complex_facts["fingerprint"] == {
+        "scheme": "datalab-signal-v2",
+        "value": signal_fingerprint_v2(_signal().x, complex_y, xunit="s"),
+    }
+
+
+def test_signal_v2_matches_independent_payload() -> None:
+    """The v2 fingerprint equals a hand-built descriptor with per-row dtypes."""
+    x = [0.0, 0.25, 0.5, 0.75]
+    y = [-2.0, 0.0, 1.0, 4.0]
+    descriptor = (
+        b'{"length":4,"rows":[{"dtype":"<f8","name":"x"},'
+        b'{"dtype":"<f4","name":"y"}],"scheme":"datalab-signal-v2",'
+        b'"units":{"x":"s","y":""}}'
+    )
+    payload = descriptor + b"\x00" + struct.pack("<4d", *x) + struct.pack("<4f", *y)
+    expected = "sha256:" + hashlib.sha256(payload).hexdigest()
+    y32 = np.array(y, dtype=">f4")
+    assert signal_fingerprint_v2(np.array(x), y32, xunit="s") == expected
+    assert signal_fingerprint_record(np.array(x), y32, xunit="s") == {
+        "scheme": "datalab-signal-v2",
+        "value": expected,
+    }
+    record = signal_fingerprint_record(np.array(x), np.array(y), xunit="s")
+    assert record == {"scheme": "datalab-signal-v1", "value": SIGNAL_FINGERPRINT}
+    with pytest.raises(ValueError):
+        signal_fingerprint_v2(np.array(x), np.array(["a", "b", "c", "d"]))
+
+
+@pytest.mark.parametrize("dtype", [np.float32, np.complex128, np.complex64])
+def test_signal_object_and_stored_rows_agree(dtype) -> None:
+    """An object and its stored ``xydata`` rows give the same fingerprint record.
+
+    Sigima stores the rows of a signal in one array (``xydata``) of the value
+    dtype, and exposes ``x`` and ``dx`` as real float64.
+    """
+    x = np.array([0.0, 0.5, 1.0, 1.5])
+    y = np.array([1.0, -2.0, 3.5, 0.25]) * (1 + 1j if dtype != np.float32 else 1)
+    dy = np.full(4, 0.125)
+    xydata = np.vstack([x, y, np.full(4, np.nan), dy]).astype(dtype)
+    live = signal_state_facts(
+        _signal(x=xydata[0].real.astype(float), y=xydata[1], dy=xydata[3], yunit="V")
+    )
+    stored = signal_fingerprint_record(*xydata, "s", "V")
+    assert live["fingerprint"] == stored
+    assert stored["scheme"] == "datalab-signal-v2"
+    assert live["rows"] == ["x", "y", "dy"]
+    changed = xydata.copy()
+    changed[1, 0] += 1j if dtype != np.float32 else 1
+    assert signal_fingerprint_record(*changed, "s", "V") != stored
 
 
 def test_image_fingerprint_matches_independent_payload() -> None:
@@ -214,7 +267,15 @@ def test_image_state_facts() -> None:
     coords = (np.array([0.0, 1.0, 3.0]), np.array([0.0, 2.0]))
     nonuniform = image_state_facts(image(data, coords=coords))
     assert nonuniform["fingerprint"]["value"] != facts["fingerprint"]["value"]
-    complex_image = image_state_facts(image(data.astype(np.complex128)))
-    assert complex_image["fingerprint"] is None
-    assert complex_image["limits"] == ["complex_dtype"]
+    complex_data = data.astype(np.complex128) * (1 - 2j)
+    complex_image = image_state_facts(image(complex_data))
+    assert complex_image["limits"] == [] and complex_image["dtype"] == "complex128"
+    assert complex_image["fingerprint"] == {
+        "scheme": "datalab-image-v1",
+        "value": image_fingerprint(
+            complex_data, xunit="mm", yunit="mm", zunit="counts"
+        ),
+    }
+    conjugate = image_state_facts(image(complex_data.conj()))
+    assert conjugate["fingerprint"] != complex_image["fingerprint"]
     assert state_facts(_signal())["kind"] == "signal"
