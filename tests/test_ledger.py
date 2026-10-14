@@ -87,6 +87,58 @@ def test_make_call_and_reserved_bindings() -> None:
     assert opaque["operation"] is None and opaque["parameters"] is None
 
 
+#: Parameters in the typed forms of the Sigima parameter codec (version 2): an
+#: envelope of ROI parameter sets, an array, a tuple choice and non-finite values.
+TYPED_PARAMETERS = {
+    "params": [
+        {"title": "a", "xmin": {"$float": "-Infinity"}, "xmax": 1.0},
+        {
+            "title": "polygon",
+            "points": {
+                "$ndarray": {
+                    "dtype": "<f8",
+                    "shape": [2],
+                    "base64": "AAAAAAAAAAAAAAAAAAAQQA==",
+                }
+            },
+            "levels": {"$tuple": [10, 90]},
+            "gain": {"$complex": [1.0, {"$float": "NaN"}]},
+        },
+    ],
+    "p": None,
+}
+
+
+def test_typed_parameters_are_kept_verbatim() -> None:
+    """Typed parameter forms are stored and read back without interpretation."""
+    ledger = Ledger()
+    state = ledger.observe(
+        "00000000-0000-4000-8000-000000000001", signal_state_facts(signal([1.0, 2.0]))
+    )
+    call = make_call(
+        "sigima.signal.extract_rois", 1, TYPED_PARAMETERS, [("source", state)]
+    )
+    validate_call(call)
+    activity = ledger.record_activity(
+        call=call,
+        outputs=[
+            (
+                "result",
+                "00000000-0000-4000-8000-000000000002",
+                signal_state_facts(signal([1.0])),
+            )
+        ],
+        environment=_environment(),
+        edition="desktop",
+        origin="ordinary",
+    )
+    ledger.validate()
+    restored = Ledger.from_json(ledger.to_json())
+    restored.validate()
+    stored = restored.activity(activity["activity_id"])["call"]["parameters"]
+    assert stored == TYPED_PARAMETERS
+
+
 def test_chain_round_trip_and_state_reuse() -> None:
     """A chain round-trips through JSON; unchanged objects reuse their state."""
     ledger, ids = _chain()
