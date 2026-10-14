@@ -38,7 +38,12 @@ from datalab_capsule.compare import (
 )
 from datalab_capsule.environment import collect_environment, environment_id
 from datalab_capsule.hdf5 import load_ledger, save_ledger
-from datalab_capsule.integrity import ProvenanceError, signal_rows, state_facts
+from datalab_capsule.integrity import (
+    ProvenanceError,
+    roi_facts,
+    signal_rows,
+    state_facts,
+)
 from datalab_capsule.ledger import Ledger, artifact_status, utc_timestamp
 from datalab_capsule.legacy import (
     PROCESSING_KEY,
@@ -112,8 +117,8 @@ class Computation:
          above, or None for an unexpected error.
         comparison_rule: ``(contract) -> rule``: comparison rule declared by the
          qualification, as plain data, or None.
-        check_preconditions: Provisional ``(contract, objects) -> failing check
-         or None``.
+        qualification_status: ``(contract) -> status``: ``qualified``,
+         ``not_qualified`` or ``qualification_outdated``.
     """
 
     describe_call: Callable[..., dict[str, Any]]
@@ -122,8 +127,8 @@ class Computation:
     normalize_outputs: Callable[[Any, Any], list[tuple[str, Any]]]
     eligibility_code: Callable[[BaseException], str | None]
     comparison_rule: Callable[[Any], dict[str, Any] | None] = lambda _contract: None
-    check_preconditions: Callable[[Any, list[Any]], str | None] = (
-        lambda _contract, _objects: None
+    qualification_status: Callable[[Any], str] = lambda contract: (
+        "qualified" if contract.qualified else "not_qualified"
     )
 
 
@@ -162,9 +167,7 @@ def computation_from_sigima(execution: Any, contracts: Any) -> Computation:
         comparison_rule=lambda contract: (
             None if contract.comparison is None else contract.comparison.to_dict()
         ),
-        check_preconditions=lambda contract, objects: contract.check_preconditions(
-            objects
-        ),
+        qualification_status=lambda contract: contract.qualification_status,
     )
 
 
@@ -191,6 +194,11 @@ def comparison_rows(obj: Any, kind: str) -> dict[str, Any]:
 
 def _units(obj: Any) -> tuple[str, ...]:
     return tuple(getattr(obj, f"{axis}unit", "") or "" for axis in "xyz")
+
+
+def _roi_digest(obj: Any) -> str | None:
+    facts = roi_facts(getattr(obj, "roi", None))
+    return None if facts is None else facts["digest"]
 
 
 @dataclasses.dataclass
@@ -398,31 +406,21 @@ class Recorder:
         objs: list[Any],
         roles: Sequence[str],
     ) -> tuple[dict[str, Any], list[str], dict[str, Any]]:
-        """Return the call, its limits and the implementation of an execution."""
+        """Return the call, its limits and the implementation of an execution.
+
+        The identity of the operation is kept as soon as the computation library
+        knows it, whether or not its contract is qualified for replay: the
+        qualification is checked when replaying, against the local library.
+        """
         description = self.computation.describe_call(func, objs, param, roles=roles)
-        operation = description["operation"]
-        if (
-            operation is not None
-            and description["qualification"]["status"] == "qualified"
-            and description["parameters"] is not None
-            and not description["limits"]
-        ):
-            contract = self.computation.get_contract(
-                operation["id"], operation["contract_version"]
-            )
-            if self.computation.check_preconditions(contract, objs) is None:
-                call = make_call(
-                    operation["id"],
-                    operation["contract_version"],
-                    description["parameters"],
-                    list(zip(description["roles"], state_ids)),
-                )
-                return call, [], description["implementation"]
-        opaque = self.computation.describe_call(
-            func, objs, param, roles=roles, contract=None
+        operation = description["operation"] or {}
+        call = make_call(
+            operation.get("id"),
+            operation.get("contract_version"),
+            description["parameters"],
+            list(zip(description["roles"], state_ids)),
         )
-        call = make_call(None, None, opaque["parameters"], list(zip(roles, state_ids)))
-        return call, list(opaque["limits"]), opaque["implementation"]
+        return call, list(description["limits"]), description["implementation"]
 
     def begin(
         self,
@@ -657,8 +655,15 @@ class Recorder:
             contract = self.computation.get_contract(operation_id, version)
         except Exception as exc:  # pylint: disable=broad-exception-caught
             raise self._ineligible(exc) from exc
-        if not contract.qualified:
-            raise IneligibleError("unsupported_operation", "Contract not qualified")
+        status = self.computation.qualification_status(contract)
+        if status != "qualified":
+            reason = {
+                "qualification_outdated": "its qualification names another version",
+            }.get(status, "it is not qualified yet")
+            raise IneligibleError(
+                "unsupported_contract",
+                f"{operation_id} v{version} cannot be replayed: {reason}",
+            )
         return contract
 
     def prepare(self, activity_id: str) -> Plan | Refusal:
@@ -695,7 +700,7 @@ class Recorder:
             resolve_contract=self.resolve_contract,
             find_object=self.host.find_object,
             observe_object=self.facts,
-            check_preconditions=self.computation.check_preconditions,
+            check_preconditions=lambda _contract, _objects: None,
             decode_parameters=lambda _contract, values: values,
             state_status=self.state_status,
             apply_context=apply_context,
@@ -788,8 +793,12 @@ class Recorder:
                 self.computation.comparison_rule(plan.contract),
                 environment=environment["match"],
             )
-            if _units(candidate) != _units(ref_obj) or (
-                kind != self.host.object_kind(ref_obj)
+            roi_match = _roi_digest(candidate) == _roi_digest(ref_obj)
+            comparison["observed"]["roi_match"] = roi_match
+            if (
+                not roi_match
+                or _units(candidate) != _units(ref_obj)
+                or kind != self.host.object_kind(ref_obj)
             ):
                 comparison["verdict"] = "different"
         return build_report(
