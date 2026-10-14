@@ -279,7 +279,7 @@ def test_legacy_activities_are_never_replayed() -> None:
 
 
 def test_object_bindings_are_reserved_to_legacy_activities() -> None:
-    """Ordinary activities keep state bindings; legacy ones are never qualified."""
+    """Ordinary activities keep state bindings; legacy ones name no operation."""
     ledger, activities = _import()
     data = ledger.to_dict()
     data["activities"][0]["origin"] = "ordinary"
@@ -290,7 +290,7 @@ def test_object_bindings_are_reserved_to_legacy_activities() -> None:
         "id": "sigima.signal.normalize",
         "contract_version": 1,
     }
-    with pytest.raises(LedgerError, match="never qualified"):
+    with pytest.raises(LedgerError, match="never names an operation"):
         validate_ledger(data)
     data = ledger.to_dict()
     del data["activities"][0]["legacy"]

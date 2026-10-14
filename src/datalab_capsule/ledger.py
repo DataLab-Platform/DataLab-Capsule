@@ -118,7 +118,7 @@ def validate_ledger(data: Any) -> None:
             if state_id is not None and state_id not in states:
                 problems.append(f"{where}: unknown input state")
         if legacy and not is_opaque(activity["call"]):
-            problems.append(f"{where}: a legacy activity is never qualified")
+            problems.append(f"{where}: a legacy activity never names an operation")
         if legacy:
             observed = activity["legacy"].get("observed_state_id")
             if observed is not None and observed not in states:

@@ -4,8 +4,12 @@
 
 A call names an operation (identifier and contract version), its parameters as
 plain JSON values and one binding per input role. Repeated roles appear once per
-input, in call order. A call whose ``operation`` is ``None`` is *opaque*: the
-operation has no qualified contract and the call is never replayed.
+input, in call order. A call whose ``operation`` is ``None`` is *opaque*: it
+names no operation (a function unknown to the computation library, such as a
+plugin, or a record written without identity by an older version) and it is
+never replayed. A call that names an operation keeps it whether or not the
+contract is qualified for replay: a replay checks the qualification of that
+contract version against the local library.
 
 Binding kinds:
 
