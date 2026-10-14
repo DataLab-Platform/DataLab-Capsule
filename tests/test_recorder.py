@@ -23,7 +23,7 @@ from datalab_capsule.recorder import (
 )
 from datalab_capsule.replay import Plan, Refusal
 
-from .helpers import signal
+from .helpers import ROI, signal
 
 UUIDS = [f"00000000-0000-4000-8000-{i:012d}" for i in range(1, 20)]
 
@@ -67,6 +67,11 @@ def scale(src, factor):
 def shift(src, offset):
     """Fake operation without qualification."""
     return signal(src.y + offset, x=src.x)
+
+
+def plugin(src, offset):
+    """Fake function unknown to the computation library (e.g. a plugin)."""
+    return signal(src.y - offset, x=src.x)
 
 
 CONTRACTS = {
@@ -188,12 +193,15 @@ def test_capture_qualified_and_opaque_calls(workspace) -> None:
     assert activity["context"] == {"roi": None, "mask": None, "x_alignment": None}
     assert activity["edition"] == "desktop" and activity["command_id"] == UUIDS[18]
     _pending, activity = _run(recorder, workspace, shift, 1.0, index=2)
+    assert activity["call"]["operation"] == {"id": "test.shift", "contract_version": 1}
+    _pending, activity = _run(recorder, workspace, plugin, 1.0, index=3)
     assert activity["call"]["operation"] is None
     assert activity["implementation"]["python_name"] == "x"
     src = workspace.objects[UUIDS[0]]
     pending = recorder.begin(shift, "unencodable", src)
     assert pending.limits == ["parameters_not_encoded"]
     assert pending.call["parameters"] is None
+    assert pending.call["operation"]["id"] == "test.shift"
     context = {"x_alignment": {"rule": "r", "version": 1}, "options": {"o": True}}
     pending = recorder.begin(scale, 2.0, src, context=context)
     activity = recorder.complete(pending, workspace.add(scale(src, 2.0), 4))
@@ -276,9 +284,19 @@ def test_verify(workspace) -> None:
     finally:
         CONTRACTS[("test.scale", 1)].rule = None
     assert noisy["verdict"] == "within_tolerance"
+    shifted_roi = recorder.verify(
+        activity_id, lambda p: _with_roi(p.run(), ROI([0.0, 0.5]))
+    )
+    assert shifted_roi["verdict"] == "different"
+    assert shifted_roi["observed"]["roi_match"] is False
     src.y = src.y + 1.0
     changed = recorder.verify(activity_id, lambda p: p.run())
     assert changed["eligibility"] == "input_changed"
+
+
+def _with_roi(obj, roi):
+    obj.roi = roi
+    return obj
 
 
 @pytest.mark.parametrize(
@@ -292,7 +310,7 @@ def test_verify(workspace) -> None:
         (
             {"id": "test.shift", "contract_version": 1},
             {"factor": 2.0},
-            "unsupported_operation",
+            "unsupported_contract",
         ),
         (
             {"id": "test.scale", "contract_version": 1},
