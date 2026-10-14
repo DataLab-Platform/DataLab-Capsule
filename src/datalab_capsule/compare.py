@@ -22,7 +22,9 @@ __all__ = [
     "RESTORATION_STATUSES",
     "VERDICTS",
     "ReportError",
+    "artifact_content",
     "build_report",
+    "compare_artifacts",
     "compare_environments",
     "compare_exact",
     "compare_rows",
@@ -40,6 +42,9 @@ ELIGIBILITY_CODES = (
     "invalid_parameters",
 )
 VERDICTS = ("exact", "within_tolerance", "different", "not_verified")
+#: Verdicts by increasing severity: the verdict of a report is the most severe
+#: verdict of its outputs.
+_SEVERITY = ("exact", "within_tolerance", "not_verified", "different")
 
 
 class ReportError(ProvenanceError, ValueError):
@@ -230,6 +235,82 @@ def compare_rows(
     return {"verdict": verdict, "rule": applied, "observed": observed}
 
 
+def artifact_content(
+    kind: str, value: Mapping[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return the structure and the numeric rows of an analysis result.
+
+    *value* is the stored form of a ``table`` or ``geometry`` result (as written
+    by Sigima's ``to_dict``): a table has ``names``, ``data`` and
+    ``roi_indices``; a geometry has a shape ``kind``, ``coords`` and
+    ``roi_indices``. Titles, function names and attributes (display preferences,
+    parameters) are informative and not compared.
+
+    Returns:
+        ``(structure, rows)``: the structure (kinds, column names, ROI indices)
+        must be equal; the rows (``data`` or ``coords``, as float64 arrays) are
+        compared under the rule. Non-numeric table data belong to the structure.
+    """
+    import numpy as np  # pylint: disable=import-outside-toplevel
+
+    roi = value.get("roi_indices")
+    structure: dict[str, Any] = {
+        "result_kind": kind,
+        "kind": value.get("kind"),
+        "roi_indices": None
+        if roi is None
+        else [int(i) for i in np.asarray(roi).ravel()],
+    }
+    name = "coords" if kind == "geometry" else "data"
+    if kind != "geometry":
+        structure["names"] = [str(n) for n in value.get("names") or []]
+    raw = value.get(name)
+    try:
+        rows = {name: np.asarray([] if raw is None else raw, dtype=np.float64)}
+    except (TypeError, ValueError):
+        structure[name] = np.asarray(raw, dtype=object).tolist()
+        rows = {}
+    return structure, rows
+
+
+def compare_artifacts(
+    kind: str,
+    candidate: Mapping[str, Any],
+    reference: Mapping[str, Any],
+    rule: Mapping[str, Any] | None = None,
+    *,
+    output: str = "result",
+    environment: str = "unknown",
+) -> dict[str, Any]:
+    """Compare two analysis results (stored forms) under a declared rule.
+
+    The numeric values are compared as by :func:`compare_rows`; a different
+    structure (see :func:`artifact_content`) gives the verdict ``different``.
+
+    Args:
+        kind: ``table`` or ``geometry``.
+        candidate: Stored form of the candidate result.
+        reference: Stored form of the recorded result.
+        rule: Declared comparison rule, or None for the exact rule.
+        output: Output role compared (selects the declared tolerance).
+        environment: ``match`` of :func:`compare_environments`.
+
+    Returns:
+        ``{"verdict", "rule", "observed"}``; ``observed`` also tells whether the
+        structures match (``structure_match``).
+    """
+    cand_structure, cand_rows = artifact_content(kind, candidate)
+    ref_structure, ref_rows = artifact_content(kind, reference)
+    comparison = compare_rows(
+        cand_rows, ref_rows, rule, output=output, environment=environment
+    )
+    structure_match = cand_structure == ref_structure
+    comparison["observed"]["structure_match"] = structure_match
+    if not structure_match:
+        comparison["verdict"] = "different"
+    return comparison
+
+
 def compare_exact(
     candidate: Mapping[str, Any], reference: Mapping[str, Any]
 ) -> dict[str, Any]:
@@ -303,6 +384,7 @@ def build_report(
     candidate_state_ids: list[tuple[str, str]] | None = None,
     reason: str | None = None,
     context: dict[str, Any] | None = None,
+    outputs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Assemble and validate a verification report.
 
@@ -319,6 +401,12 @@ def build_report(
         reason: Optional human-readable detail.
         context: Recorded execution context of the activity (e.g. its X-alignment
          rule), shown as is; omitted when None.
+        outputs: Comparison of each output of the activity, by role (``role``,
+         ``recorded``, ``status``, ``verdict``, ``rule``, ``observed`` and
+         ``state_id``, ``artifact`` or ``detail`` when relevant), when a
+         verification run took place. The verdict of the report is then the
+         most severe of their verdicts, and its rule and observations those of
+         the first compared output; *comparison* is not used.
 
     Returns:
         The report.
@@ -326,9 +414,21 @@ def build_report(
     Raises:
         ReportError: If the report is invalid.
     """
-    verified = comparison is not None and (
-        reference is not None and reference["status"] == "available"
-    )
+    if outputs is not None:
+        compared = next((o for o in outputs if o["rule"] is not None), {})
+        verdict = max(
+            (o["verdict"] for o in outputs), key=_SEVERITY.index, default="not_verified"
+        )
+        rule, observed = compared.get("rule"), compared.get("observed")
+    elif (
+        comparison is not None
+        and reference is not None
+        and reference["status"] == "available"
+    ):
+        verdict = comparison["verdict"]
+        rule, observed = comparison["rule"], comparison["observed"]
+    else:
+        verdict, rule, observed = "not_verified", None, None
     report = {
         "report": "datalab-verification-report",
         "report_version": 1,
@@ -339,9 +439,9 @@ def build_report(
         "inputs": inputs,
         "reference": reference,
         "environment": environment,
-        "verdict": comparison["verdict"] if verified else "not_verified",
-        "rule": comparison["rule"] if verified else None,
-        "observed": comparison["observed"] if verified else None,
+        "verdict": verdict,
+        "rule": rule,
+        "observed": observed,
         "verification_activity": None
         if candidate_state_ids is None
         else {
@@ -354,6 +454,8 @@ def build_report(
     }
     if context is not None:
         report["context"] = context
+    if outputs is not None:
+        report["outputs"] = outputs
     validate_report(report)
     return report
 

@@ -3,6 +3,44 @@
   "$id": "urn:datalab:schema:verification-report:1",
   "title": "DataLab verification report, version 1",
   "description": "Result of preparing, replaying and comparing one recorded activity. The verification run lives only in the report, never in the ledger.",
+  "$defs": {
+    "rule": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "required": ["kind"],
+          "properties": {
+            "kind": {"enum": ["exact", "tolerance"]},
+            "rtol": {"type": "number", "minimum": 0},
+            "atol": {"type": "number", "minimum": 0}
+          },
+          "if": {"properties": {"kind": {"const": "tolerance"}}},
+          "then": {"required": ["rtol", "atol"]}
+        }
+      ]
+    },
+    "observed": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "required": ["mismatches", "max_abs_error", "max_rel_error"],
+          "properties": {
+            "mismatches": {"type": "integer", "minimum": 0},
+            "max_abs_error": {"description": "Largest absolute error, or null when it is undefined for at least one mismatch.", "type": ["number", "null"]},
+            "max_rel_error": {"description": "Largest relative error, or null when it is undefined for at least one mismatch (e.g. a zero reference value).", "type": ["number", "null"]},
+            "undefined_abs_errors": {"description": "Mismatches whose absolute error is undefined (NaN placed differently, infinities).", "type": "integer", "minimum": 0},
+            "undefined_rel_errors": {"description": "Mismatches whose relative error is undefined.", "type": "integer", "minimum": 0},
+            "dtype_match": {"type": "boolean"},
+            "shape_match": {"type": "boolean"},
+            "roi_match": {"description": "Signals and images: whether the regions of interest are identical.", "type": "boolean"},
+            "structure_match": {"description": "Analysis results: whether kinds, column names and ROI indices are identical.", "type": "boolean"}
+          }
+        }
+      ]
+    }
+  },
   "type": "object",
   "required": ["report", "report_version", "activity_id", "restoration", "eligibility", "inputs", "reference", "environment", "verdict", "rule", "observed", "verification_activity"],
   "properties": {
@@ -52,39 +90,33 @@
       }
     },
     "verdict": {"enum": ["exact", "within_tolerance", "different", "not_verified"]},
-    "rule": {
-      "oneOf": [
-        {"type": "null"},
-        {
-          "type": "object",
-          "required": ["kind"],
-          "properties": {
-            "kind": {"enum": ["exact", "tolerance"]},
-            "rtol": {"type": "number", "minimum": 0},
-            "atol": {"type": "number", "minimum": 0}
+    "rule": {"$ref": "#/$defs/rule"},
+    "observed": {"$ref": "#/$defs/observed"},
+    "outputs": {
+      "description": "Comparison of each output of the activity, by role, when a verification run took place. The verdict of the report is the most severe of these verdicts (exact, within_tolerance, not_verified, different); its rule and observations are those of the first compared output.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["role", "recorded", "status", "verdict", "rule", "observed"],
+        "properties": {
+          "role": {"type": "string"},
+          "recorded": {"description": "What the activity recorded for this role: a state, an analysis result (artifact) or no result (an optional output without result, e.g. a detection that found nothing).", "enum": ["state", "artifact", "none"]},
+          "state_id": {"type": "string"},
+          "artifact": {
+            "type": "object",
+            "required": ["object_uuid", "key"],
+            "properties": {
+              "object_uuid": {"type": "string"},
+              "key": {"type": "string"}
+            }
           },
-          "if": {"properties": {"kind": {"const": "tolerance"}}},
-          "then": {"required": ["rtol", "atol"]}
+          "status": {"description": "Status of the recorded output: available, missing, altered (state) or replaced (analysis result).", "enum": ["available", "missing", "altered", "replaced"]},
+          "verdict": {"enum": ["exact", "within_tolerance", "different", "not_verified"]},
+          "rule": {"$ref": "#/$defs/rule"},
+          "observed": {"$ref": "#/$defs/observed"},
+          "detail": {"type": ["string", "null"]}
         }
-      ]
-    },
-    "observed": {
-      "oneOf": [
-        {"type": "null"},
-        {
-          "type": "object",
-          "required": ["mismatches", "max_abs_error", "max_rel_error"],
-          "properties": {
-            "mismatches": {"type": "integer", "minimum": 0},
-            "max_abs_error": {"description": "Largest absolute error, or null when it is undefined for at least one mismatch.", "type": ["number", "null"]},
-            "max_rel_error": {"description": "Largest relative error, or null when it is undefined for at least one mismatch (e.g. a zero reference value).", "type": ["number", "null"]},
-            "undefined_abs_errors": {"description": "Mismatches whose absolute error is undefined (NaN placed differently, infinities).", "type": "integer", "minimum": 0},
-            "undefined_rel_errors": {"description": "Mismatches whose relative error is undefined.", "type": "integer", "minimum": 0},
-            "dtype_match": {"type": "boolean"},
-            "shape_match": {"type": "boolean"}
-          }
-        }
-      ]
+      }
     },
     "verification_activity": {
       "oneOf": [

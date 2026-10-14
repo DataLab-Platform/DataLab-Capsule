@@ -5,9 +5,9 @@
 The recorder holds the workspace ledger of one application and implements what
 both editions need: building operation calls from the description of the
 computation library, recording executions (``begin``, ``complete``,
-``complete_analysis``, deferred finalization), artifact statuses, replay
-preparation and verification, and the ledger lifecycle (reset, save, load,
-import of old workspaces).
+``complete_analysis``, ``complete_without_result``, deferred finalization),
+artifact statuses, replay preparation and verification of every output, and the
+ledger lifecycle (reset, save, load, import of old workspaces).
 
 An edition only provides its accesses (:class:`RecorderHost`): object UUIDs,
 lookup and iteration, the kind of an object, its state facts, and whether an
@@ -33,6 +33,7 @@ from typing import Any
 from datalab_capsule.calls import make_call
 from datalab_capsule.compare import (
     build_report,
+    compare_artifacts,
     compare_environments,
     compare_rows,
 )
@@ -54,6 +55,7 @@ from datalab_capsule.legacy import (
 from datalab_capsule.replay import IneligibleError, Plan, Refusal, prepare_activity
 
 __all__ = [
+    "CandidateError",
     "Computation",
     "PendingActivity",
     "Recorder",
@@ -71,6 +73,15 @@ class StateUnavailableError(ProvenanceError):
 
     For example, DataLab-Web raises it for objects whose arrays were spilled to
     disk to save memory.
+    """
+
+
+class CandidateError(ProvenanceError):
+    """Raised by ``execute_candidate`` when a candidate computation fails.
+
+    Also raised when it is cancelled. A candidate returning None is not a
+    failure: the computation produced no result (e.g. a detection that found
+    nothing), which is compared with what the activity recorded.
     """
 
 
@@ -119,6 +130,9 @@ class Computation:
          qualification, as plain data, or None.
         qualification_status: ``(contract) -> status``: ``qualified``,
          ``not_qualified`` or ``qualification_outdated``.
+        artifact_value: ``(analysis result) -> stored form``: the form in which
+         the editions store an analysis result in object metadata (by default,
+         its ``to_dict()``), compared with the recorded one.
     """
 
     describe_call: Callable[..., dict[str, Any]]
@@ -130,6 +144,7 @@ class Computation:
     qualification_status: Callable[[Any], str] = lambda contract: (
         "qualified" if contract.qualified else "not_qualified"
     )
+    artifact_value: Callable[[Any], Any] = lambda result: result.to_dict()
 
 
 def computation_from_sigima(execution: Any, contracts: Any) -> Computation:
@@ -405,12 +420,13 @@ class Recorder:
         state_ids: list[str],
         objs: list[Any],
         roles: Sequence[str],
-    ) -> tuple[dict[str, Any], list[str], dict[str, Any]]:
-        """Return the call, its limits and the implementation of an execution.
+    ) -> tuple[dict[str, Any], list[str], dict[str, Any], dict[str, Any]]:
+        """Return the call, limits, implementation and context of an execution.
 
         The identity of the operation is kept as soon as the computation library
         knows it, whether or not its contract is qualified for replay: the
-        qualification is checked when replaying, against the local library.
+        qualification is checked when replaying, against the local library. The
+        context holds the global options read by the computation, if any.
         """
         description = self.computation.describe_call(func, objs, param, roles=roles)
         operation = description["operation"] or {}
@@ -420,7 +436,14 @@ class Recorder:
             description["parameters"],
             list(zip(description["roles"], state_ids)),
         )
-        return call, list(description["limits"]), description["implementation"]
+        options = description.get("options")
+        context = {"options": dict(options)} if options else {}
+        return (
+            call,
+            list(description["limits"]),
+            description["implementation"],
+            context,
+        )
 
     def begin(
         self,
@@ -448,7 +471,8 @@ class Recorder:
              ``source``, or ``source`` and ``operand`` for two inputs.
             limits: Extra reasons why the activity is not replayable.
             context: Execution context of the prepared computation (X alignment,
-             global options), if known before it runs.
+             global options), if known before it runs; by default, the global
+             options read by the computation (see ``describe_call``).
 
         Returns:
             A pending activity, or None when the execution is not captured.
@@ -465,7 +489,7 @@ class Recorder:
             return None
         try:
             state_ids = [self.observe(obj) for obj in objs]
-            call, call_limits, implementation = self._build_call(
+            call, call_limits, implementation, described = self._build_call(
                 func, param, state_ids, objs, roles
             )
             pending = PendingActivity(
@@ -475,7 +499,7 @@ class Recorder:
                 command_id=command_id,
                 origin=origin,
                 started_at=utc_timestamp(),
-                context=dict(context or {}),
+                context={**described, **(context or {})},
             )
             if x_alignment is not None:
                 pending.x_alignment = x_alignment
@@ -564,6 +588,27 @@ class Recorder:
                 obj.metadata[key],
             )
             return self._record(pending, [], origin, artifacts=[artifact])
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self._capture_failed(exc)
+            return None
+
+    def complete_without_result(
+        self, pending: PendingActivity | None
+    ) -> dict[str, Any] | None:
+        """Record a completed execution that produced no result.
+
+        For a computation whose output is optional and which returned None
+        without error (e.g. a detection that found nothing). An error or a
+        cancellation is not recorded.
+
+        Returns:
+            The recorded activity (without outputs), or None.
+        """
+        if pending is None:
+            return None
+        try:
+            origin = pending.origin if self._deferred is None else self._deferred.origin
+            return self._record(pending, [], origin)
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self._capture_failed(exc)
             return None
@@ -707,42 +752,142 @@ class Recorder:
         )
         return result, holder.get("prepared")
 
-    def _reference(self, activity: dict[str, Any]) -> tuple[dict | None, Any]:
-        """Return the reference status and object of an activity's result."""
-        output = next(
-            (
-                o
-                for o in activity["outputs"]
-                if "state_id" in o and o["role"] == "result"
-            ),
-            None,
-        )
-        if output is None:
-            return None, None
-        state = self.ledger.states[output["state_id"]]
-        obj = self.host.find_object(state["object_uuid"])
-        status = "available"
-        if obj is None or self.state_status.get(state["state_id"]) == "unavailable":
-            status, obj = "missing", None
-        elif self.state_status.get(state["state_id"]) == "altered" or (
-            self.facts(obj)["fingerprint"] != state["fingerprint"]
-        ):
-            status = "altered"
-        return {"state_id": state["state_id"], "status": status}, obj
+    def _references(self, activity: dict[str, Any]) -> list[dict[str, Any]]:
+        """Return the recorded outputs of an activity with their current status.
+
+        Returns:
+            One item per recorded output: ``role``, ``recorded`` (``state`` or
+            ``artifact``), ``status`` and ``value`` (the reference object or
+            stored analysis result when available, else None), plus
+            ``state_id``, or ``artifact`` and ``kind``.
+        """
+        references = []
+        for output in activity["outputs"]:
+            if "state_id" in output:
+                state = self.ledger.states[output["state_id"]]
+                obj = self.host.find_object(state["object_uuid"])
+                status = "available"
+                if (
+                    obj is None
+                    or self.state_status.get(state["state_id"]) == "unavailable"
+                ):
+                    status, obj = "missing", None
+                elif self.state_status.get(state["state_id"]) == "altered" or (
+                    self.facts(obj)["fingerprint"] != state["fingerprint"]
+                ):
+                    status = "altered"
+                references.append(
+                    {
+                        "role": output["role"],
+                        "recorded": "state",
+                        "state_id": state["state_id"],
+                        "status": status,
+                        "value": obj,
+                    }
+                )
+                continue
+            artifact = output["artifact"]
+            obj = self.host.find_object(artifact["object_uuid"])
+            value = None if obj is None else obj.metadata.get(artifact["key"])
+            status = artifact_status(artifact, value)
+            references.append(
+                {
+                    "role": output["role"],
+                    "recorded": "artifact",
+                    "artifact": {
+                        "object_uuid": artifact["object_uuid"],
+                        "key": artifact["key"],
+                    },
+                    "kind": artifact["kind"],
+                    "status": status,
+                    "value": value if status == "available" else None,
+                }
+            )
+        return references
+
+    def _compare_output(
+        self,
+        contract: Any,
+        reference: dict[str, Any],
+        value: Any,
+        environment: str,
+    ) -> dict[str, Any]:
+        """Compare one candidate output with its recorded reference."""
+        entry = {
+            key: reference[key]
+            for key in ("role", "recorded", "state_id", "artifact", "status")
+            if key in reference
+        }
+        entry.update(verdict="not_verified", rule=None, observed=None, detail=None)
+        if reference["recorded"] == "none" or value is None:
+            if reference["recorded"] == "none" and value is None:
+                entry["verdict"] = "exact"
+            elif value is None:
+                entry.update(verdict="different", detail="No result was produced")
+            else:
+                entry.update(
+                    verdict="different",
+                    detail="A result was produced where the activity recorded none",
+                )
+            return entry
+        if reference["status"] != "available":
+            entry["detail"] = f"The recorded output is {reference['status']}"
+            return entry
+        rule = self.computation.comparison_rule(contract)
+        role = reference["role"]
+        if reference["recorded"] == "artifact":
+            comparison = compare_artifacts(
+                reference["kind"],
+                self.computation.artifact_value(value),
+                reference["value"],
+                rule,
+                output=role,
+                environment=environment,
+            )
+        else:
+            ref_obj = reference["value"]
+            kind, ref_kind = (
+                self.host.object_kind(value),
+                self.host.object_kind(ref_obj),
+            )
+            if kind != ref_kind:
+                entry.update(
+                    verdict="different",
+                    detail=f"A {kind or type(value).__name__} was produced "
+                    f"instead of a {ref_kind}",
+                )
+                return entry
+            comparison = compare_rows(
+                comparison_rows(value, kind),
+                comparison_rows(ref_obj, ref_kind),
+                rule,
+                output=role,
+                environment=environment,
+            )
+            roi_match = _roi_digest(value) == _roi_digest(ref_obj)
+            comparison["observed"]["roi_match"] = roi_match
+            if not roi_match or _units(value) != _units(ref_obj):
+                comparison["verdict"] = "different"
+        entry.update(comparison)
+        return entry
 
     def verify(
         self, activity_id: str, execute_candidate: Callable[[Any], Any]
     ) -> dict[str, Any]:
         """Recompute a recorded activity as a separate candidate and compare it.
 
-        The workspace and the ledger never change; the verification run only
-        appears in the returned report.
+        Every output of the operation is compared with the recorded one, by
+        role: signals and images (data, coordinates, ROI, units), analysis
+        results (structure and values) and the absence of result of an optional
+        output. The workspace and the ledger never change; the verification run
+        only appears in the returned report.
 
         Args:
             activity_id: Activity to verify.
             execute_candidate: ``(prepared execution) -> result``; runs the
-             computation without inserting the result, and returns None on error
-             or cancellation.
+             computation without inserting the result and returns what the
+             function returned (None when it produced no result); raises
+             :class:`CandidateError` on error or cancellation.
 
         Returns:
             Verification report.
@@ -755,60 +900,65 @@ class Recorder:
             environment_id(self.environment),
             self.environment,
         )
-        reference, ref_obj = self._reference(activity)
+        references = self._references(activity)
+        reference = next(
+            (
+                {"state_id": ref["state_id"], "status": ref["status"]}
+                for ref in references
+                if ref["recorded"] == "state"
+            ),
+            None,
+        )
         plan, prepared = self.prepare_replay(activity_id)
+        report = {
+            "activity_id": activity_id,
+            "reference": reference,
+            "environment": environment,
+            "context": activity["context"],
+        }
         if not isinstance(plan, Plan):
             return build_report(
-                activity_id=activity_id,
                 restoration=plan.restoration,
                 eligibility=plan.eligibility,
                 inputs=list(plan.input_statuses),
-                reference=reference,
-                environment=environment,
                 reason=plan.reason,
-                context=activity["context"],
+                **report,
             )
-        inputs = [
-            {"role": role, "state_id": state_id, "status": "available"}
-            for role, state_id, _obj in plan.inputs
-        ]
-        candidate = execute_candidate(prepared)
-        if candidate is None:
-            return build_report(
-                activity_id=activity_id,
-                restoration="replayable",
-                eligibility="ready",
-                inputs=inputs,
-                reference=reference,
-                environment=environment,
-                reason="The candidate computation failed or was cancelled",
-                context=activity["context"],
-            )
-        comparison = None
-        kind = self.host.object_kind(candidate)
-        if ref_obj is not None and kind is not None:
-            comparison = compare_rows(
-                comparison_rows(candidate, kind),
-                comparison_rows(ref_obj, self.host.object_kind(ref_obj)),
-                self.computation.comparison_rule(plan.contract),
-                environment=environment["match"],
-            )
-            roi_match = _roi_digest(candidate) == _roi_digest(ref_obj)
-            comparison["observed"]["roi_match"] = roi_match
-            if (
-                not roi_match
-                or _units(candidate) != _units(ref_obj)
-                or kind != self.host.object_kind(ref_obj)
-            ):
-                comparison["verdict"] = "different"
-        return build_report(
-            activity_id=activity_id,
+        report.update(
             restoration="replayable",
             eligibility="ready",
-            inputs=inputs,
-            reference=reference,
-            environment=environment,
-            comparison=comparison,
-            candidate_state_ids=[("result", str(uuid.uuid4()))],
-            context=activity["context"],
+            inputs=[
+                {"role": role, "state_id": state_id, "status": "available"}
+                for role, state_id, _obj in plan.inputs
+            ],
+        )
+        try:
+            candidate = execute_candidate(prepared)
+        except CandidateError as exc:
+            return build_report(
+                reason=f"The candidate computation failed or was cancelled: {exc}",
+                **report,
+            )
+        try:
+            produced = self.computation.normalize_outputs(plan.contract, candidate)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            return build_report(
+                reason=f"The candidate result does not match the contract: {exc}",
+                **report,
+            )
+        recorded = {ref["role"]: ref for ref in references}
+        outputs = []
+        candidate_ids = []
+        for role, value in produced:
+            ref = recorded.get(role, {"role": role, "recorded": "none"})
+            ref.setdefault("status", "available")
+            outputs.append(
+                self._compare_output(plan.contract, ref, value, environment["match"])
+            )
+            if value is not None and self.host.object_kind(value) is not None:
+                candidate_ids.append((role, str(uuid.uuid4())))
+        return build_report(
+            outputs=outputs,
+            candidate_state_ids=candidate_ids,
+            **report,
         )

@@ -11,6 +11,7 @@ from datalab_capsule.calls import make_call
 from datalab_capsule.compare import (
     ReportError,
     build_report,
+    compare_artifacts,
     compare_environments,
     compare_exact,
     compare_rows,
@@ -381,3 +382,107 @@ def test_compare_rows_with_a_declared_tolerance() -> None:
     )
     assert report["verdict"] == "within_tolerance"
     assert report["rule"]["declared"]["justification"] == TOLERANCE["justification"]
+
+
+TABLE = {
+    "schema": 1,
+    "title": "Statistics",
+    "kind": "statistics",
+    "names": ["mean", "std"],
+    "data": [[1.0, 0.5], [2.0, float("nan")]],
+    "roi_indices": [0, 1],
+    "func_name": "stats",
+    "attrs": {"param_json": "{}"},
+}
+
+
+def test_compare_analysis_results() -> None:
+    """Analysis results: values under the rule, structure exactly."""
+    other_attrs = {**TABLE, "title": "Stats", "attrs": {}, "func_name": None}
+    result = compare_artifacts("table", other_attrs, TABLE)
+    assert result["verdict"] == "exact" and result["observed"]["structure_match"]
+    close = {**TABLE, "data": [[1.0 + 1e-13, 0.5], [2.0, float("nan")]]}
+    assert compare_artifacts("table", close, TABLE)["verdict"] == "different"
+    tolerant = compare_artifacts(
+        "table", close, TABLE, TOLERANCE, environment="different"
+    )
+    assert tolerant["verdict"] == "within_tolerance"
+    for changed in (
+        {**TABLE, "names": ["mean", "sigma"]},
+        {**TABLE, "roi_indices": [0, 2]},
+        {**TABLE, "data": [[1.0, 0.5]], "roi_indices": [0, 1]},
+    ):
+        assert compare_artifacts("table", changed, TABLE)["verdict"] == "different"
+    text = {**TABLE, "data": [["a", 1.0]]}
+    assert compare_artifacts("table", text, text)["verdict"] == "exact"
+    assert (
+        compare_artifacts("table", {**text, "data": [["b", 1.0]]}, text)["observed"][
+            "structure_match"
+        ]
+        is False
+    )
+    geometry = {
+        "schema": 1,
+        "title": "FWHM",
+        "kind": "segment",
+        "coords": np.array([[0.0, 1.0, 2.0, 1.0]]),
+        "roi_indices": None,
+        "func_name": "fwhm",
+        "attrs": {},
+    }
+    as_lists = {**geometry, "coords": [[0.0, 1.0, 2.0, 1.0]]}
+    assert compare_artifacts("geometry", as_lists, geometry)["verdict"] == "exact"
+    point = {**geometry, "kind": "point"}
+    assert compare_artifacts("geometry", point, geometry)["verdict"] == "different"
+
+
+def test_report_compares_every_output() -> None:
+    """The verdict of a report is the most severe verdict of its outputs."""
+    env = compare_environments(None, None, None, None)
+    exact = compare_rows({"y": np.ones(2)}, {"y": np.ones(2)})
+
+    def output(role: str, verdict: str, compared: bool = True) -> dict:
+        return {
+            "role": role,
+            "recorded": "artifact",
+            "artifact": {"object_uuid": "u", "key": "k"},
+            "status": "available" if compared else "replaced",
+            "verdict": verdict,
+            "rule": exact["rule"] if compared else None,
+            "observed": exact["observed"] if compared else None,
+            "detail": None,
+        }
+
+    common = {
+        "activity_id": "a",
+        "restoration": "replayable",
+        "eligibility": "ready",
+        "inputs": [],
+        "reference": None,
+        "environment": env,
+        "candidate_state_ids": [],
+    }
+    report = build_report(outputs=[output("result", "exact")], **common)
+    assert report["verdict"] == "exact" and report["rule"] == {"kind": "exact"}
+    assert report["outputs"][0]["artifact"] == {"object_uuid": "u", "key": "k"}
+    replaced = output("mask", "not_verified", compared=False)
+    report = build_report(outputs=[output("result", "exact"), replaced], **common)
+    assert report["verdict"] == "not_verified"
+    different = output("mask", "different")
+    report = build_report(outputs=[replaced, different], **common)
+    assert report["verdict"] == "different"
+    none = {
+        "role": "result",
+        "recorded": "none",
+        "status": "available",
+        "verdict": "exact",
+        "rule": None,
+        "observed": None,
+        "detail": None,
+    }
+    report = build_report(outputs=[none], **common)
+    assert (report["verdict"], report["rule"], report["observed"]) == (
+        "exact",
+        None,
+        None,
+    )
