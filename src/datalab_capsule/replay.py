@@ -126,7 +126,7 @@ def prepare_activity(
     if is_opaque(call):
         return refuse(
             "unsupported_operation",
-            "The call names no qualified operation",
+            "The call names no operation (opaque)",
             restoration="opaque",
         )
     operation = call["operation"]
