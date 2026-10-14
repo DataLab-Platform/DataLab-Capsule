@@ -22,12 +22,12 @@ Decision 0001 qualified replay for two operations only, through tables of operat
 
 ## Consequences
 
-- With Sigima 1.3, 213 of the 215 operations are qualified (175 exact, 38 with a measured tolerance); the phase spectrum is identified but not qualified, and its replay is refused with the reason.
+- With Sigima 1.3, 213 of the 215 operations are qualified (161 exact, 52 with a tolerance measured across CPython and Pyodide); the phase spectrum is identified but not qualified, and its replay is refused with the reason.
 - Patterns come from the contracts only: DataLab-Web derives its catalogue patterns from them, and a DataLab Desktop test checks every registered feature against its contract.
 - The format changes are additive within profile 0.1 (new fingerprint scheme, report `outputs`); files recorded earlier stay readable, and their opaque activities are never given an identity afterwards.
 
 ## Limits
 
-- Tolerances were measured between two CPython environments on x86-64 (NumPy 1.26 / SciPy 1.10 and NumPy 2.4 / SciPy 1.16). In Pyodide, the cross-edition scenario of each family replays exactly, but the whole catalogue has not been replayed there.
-- State fingerprints do not cover metadata: a computation that reads metadata (e.g. the fit parameters used by `evaluate_fit`) is replayed with the current metadata of its input.
+- Tolerances were measured on the calls of the Sigima validation tests, replayed between NumPy 1.26 / SciPy 1.10, NumPy 2.4 / SciPy 1.16 (CPython, x86-64) and Pyodide 0.26.4 (WebAssembly); other platforms may need them to be measured again.
+- State fingerprints do not cover metadata. Metadata read by a computation are checked only when its contract declares them (`reads_metadata`, e.g. the fit parameters used by `evaluate_fit`): their digest is recorded in the activity context, and a change refuses the replay (`input_changed`).
 - Interactive Desktop fits and the conversion of a markers table to a signal are not operation calls on recorded states and are not recorded.
