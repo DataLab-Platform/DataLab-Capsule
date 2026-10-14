@@ -7,6 +7,8 @@
     { "argv": ["validate", "valid/capture-web.dlcapsule"], "exit": 0 },
     { "argv": ["validate", "valid/difference-desktop.dlcapsule"], "exit": 0 },
     { "argv": ["validate", "valid/difference-web.dlcapsule"], "exit": 0 },
+    { "argv": ["validate", "valid/families-desktop.dlcapsule"], "exit": 0 },
+    { "argv": ["validate", "valid/families-web.dlcapsule"], "exit": 0 },
     { "argv": ["validate", "valid/chain-renamed.dlcapsule"], "exit": 0 },
     { "argv": ["validate", "valid/legacy.dlcapsule"], "exit": 0 },
     { "argv": ["validate", "valid/legacy-revision.dlcapsule"], "exit": 0 },
@@ -289,6 +291,72 @@
           "presentation": ["changed capsule name"],
           "environment": ["added environment", "removed environment"]
         }
+      }
+    },
+    {
+      "argv": ["inspect", "valid/families-desktop.dlcapsule", "--json"],
+      "exit": 0,
+      "json": {
+        "activities": [
+          { "name": "sigima.signal.average", "replayable": true, "limits": 0, "outputs": 1 },
+          { "name": "sigima.signal.signals_to_image", "replayable": true, "limits": 0, "outputs": 1 },
+          { "name": "sigima.signal.fft", "replayable": true, "limits": 0, "outputs": 1 },
+          { "name": "sigima.signal.add_gaussian_noise", "replayable": true, "limits": 0, "outputs": 1 },
+          { "name": "sigima.signal.moving_average", "replayable": true, "limits": 0, "outputs": 1 },
+          { "name": "sigima.signal.stats", "replayable": true, "limits": 0, "outputs": 1 },
+          { "name": "sigima.image.line_profile", "replayable": true, "limits": 0, "outputs": 1 },
+          { "name": "sigima.image.centroid", "replayable": true, "limits": 0, "outputs": 1 },
+          { "name": "sigima.image.convolution", "replayable": true, "limits": 0, "outputs": 1 },
+          { "name": "sigima.image.peak_detection", "replayable": true, "limits": 0, "outputs": 0 }
+        ],
+        "states": 14
+      }
+    },
+    {
+      "argv": ["verify", "valid/families-desktop.dlcapsule", "--json"],
+      "exit": 0,
+      "json": { "valid": true, "workspace": "verified", "states_located": 14, "states_altered": 0 }
+    },
+    {
+      "argv": ["inspect", "valid/families-web.dlcapsule", "--json"],
+      "exit": 0,
+      "json": {
+        "activities": [
+          { "name": "sigima.signal.average", "replayable": true, "limits": 0, "outputs": 1 },
+          { "name": "sigima.signal.signals_to_image", "replayable": true, "limits": 0, "outputs": 1 },
+          { "name": "sigima.signal.fft", "replayable": true, "limits": 0, "outputs": 1 },
+          { "name": "sigima.signal.add_gaussian_noise", "replayable": true, "limits": 0, "outputs": 1 },
+          { "name": "sigima.signal.moving_average", "replayable": true, "limits": 0, "outputs": 1 },
+          { "name": "sigima.signal.stats", "replayable": true, "limits": 0, "outputs": 1 },
+          { "name": "sigima.image.line_profile", "replayable": true, "limits": 0, "outputs": 1 },
+          { "name": "sigima.image.centroid", "replayable": true, "limits": 0, "outputs": 1 },
+          { "name": "sigima.image.convolution", "replayable": true, "limits": 0, "outputs": 1 },
+          { "name": "sigima.image.peak_detection", "replayable": true, "limits": 0, "outputs": 0 }
+        ],
+        "states": 14
+      }
+    },
+    {
+      "argv": ["verify", "valid/families-web.dlcapsule", "--json"],
+      "exit": 0,
+      "json": { "valid": true, "workspace": "verified", "states_located": 14, "states_altered": 0 }
+    },
+    {
+      "argv": [
+        "verify", "valid/families-web.dlcapsule",
+        "--report", "valid/report-families-convolution.json",
+        "--report", "valid/report-families-centroid.json",
+        "--report", "valid/report-families-detection.json",
+        "--json"
+      ],
+      "exit": 0,
+      "json": {
+        "valid": true,
+        "reports": [
+          { "verdict": "exact", "status": "valid" },
+          { "verdict": "exact", "status": "valid" },
+          { "verdict": "exact", "status": "valid" }
+        ]
       }
     },
     { "argv": ["diff", "valid/chain-desktop.dlcapsule", "invalid/tampered-manifest.dlcapsule"], "exit": 2 }

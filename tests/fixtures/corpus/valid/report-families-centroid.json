@@ -1,0 +1,140 @@
+{
+  "report": "datalab-verification-report",
+  "report_version": 1,
+  "activity_id": "d6b293fa-e524-4aec-8a88-6d354a9b92cb",
+  "restoration": "replayable",
+  "eligibility": "ready",
+  "reason": null,
+  "inputs": [
+    {
+      "role": "source",
+      "state_id": "21481c4b-3abb-4912-9796-3e53f68c8604",
+      "status": "available"
+    }
+  ],
+  "reference": null,
+  "environment": {
+    "recorded": "sha256:bd4c1a0fcf33a9c17f5faf33ce4f981253b5a5e478015254dff265248856bb57",
+    "current": "sha256:034c81a5d7e1f441a9bb63ae1e73f9b28fd87203e335ce4357daf11f96a721ac",
+    "match": "different",
+    "differences": {
+      "edition": [
+        "web",
+        "desktop"
+      ],
+      "edition_version": [
+        "0.9.0",
+        "1.3.0"
+      ],
+      "h5py": [
+        "3.11.0",
+        "3.16.0"
+      ],
+      "machine": [
+        "wasm32",
+        "AMD64"
+      ],
+      "numpy": [
+        "1.26.4",
+        "2.4.4"
+      ],
+      "platform": [
+        "emscripten",
+        "win32"
+      ],
+      "pyodide": [
+        "0.26.4",
+        null
+      ],
+      "python.version": [
+        "3.12.1",
+        "3.11.6"
+      ],
+      "scipy": [
+        "1.12.0",
+        "1.16.3"
+      ]
+    }
+  },
+  "verdict": "exact",
+  "rule": {
+    "kind": "tolerance",
+    "atol": 1e-11,
+    "rtol": 1e-14,
+    "declared": {
+      "rule": "tolerance",
+      "outputs": {
+        "result": {
+          "atol": 1e-11,
+          "rtol": 1e-14
+        }
+      },
+      "same_environment": "exact",
+      "justification": "Floating-point reductions and linear algebra (NumPy, SciPy, scikit-image) differ in the last bits across library versions"
+    },
+    "output": "result",
+    "environment": "different"
+  },
+  "observed": {
+    "mismatches": 0,
+    "max_abs_error": 0.0,
+    "max_rel_error": 0.0,
+    "undefined_abs_errors": 0,
+    "undefined_rel_errors": 0,
+    "dtype_match": true,
+    "shape_match": true,
+    "out_of_tolerance": 0,
+    "structure_match": true
+  },
+  "verification_activity": {
+    "origin": "verification",
+    "outputs": []
+  },
+  "context": {
+    "roi": null,
+    "mask": null,
+    "x_alignment": null
+  },
+  "outputs": [
+    {
+      "role": "result",
+      "recorded": "artifact",
+      "artifact": {
+        "object_uuid": "133e13b5-054f-44ad-b538-88bcb6775036",
+        "key": "Geometry_centroid_dict"
+      },
+      "status": "available",
+      "verdict": "exact",
+      "rule": {
+        "kind": "tolerance",
+        "atol": 1e-11,
+        "rtol": 1e-14,
+        "declared": {
+          "rule": "tolerance",
+          "outputs": {
+            "result": {
+              "atol": 1e-11,
+              "rtol": 1e-14
+            }
+          },
+          "same_environment": "exact",
+          "justification": "Floating-point reductions and linear algebra (NumPy, SciPy, scikit-image) differ in the last bits across library versions"
+        },
+        "output": "result",
+        "environment": "different"
+      },
+      "observed": {
+        "mismatches": 0,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0,
+        "undefined_abs_errors": 0,
+        "undefined_rel_errors": 0,
+        "dtype_match": true,
+        "shape_match": true,
+        "out_of_tolerance": 0,
+        "structure_match": true
+      },
+      "detail": null
+    }
+  ]
+}

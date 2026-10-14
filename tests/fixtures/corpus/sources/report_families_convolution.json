@@ -1,0 +1,122 @@
+{
+  "report": "datalab-verification-report",
+  "report_version": 1,
+  "activity_id": "9656c91f-7bec-4446-bf06-843313f6757e",
+  "restoration": "replayable",
+  "eligibility": "ready",
+  "reason": null,
+  "inputs": [
+    {
+      "role": "source",
+      "state_id": "21481c4b-3abb-4912-9796-3e53f68c8604",
+      "status": "available"
+    },
+    {
+      "role": "operand",
+      "state_id": "0e8a89b7-e798-4f78-805f-bfe209243650",
+      "status": "available"
+    }
+  ],
+  "reference": {
+    "state_id": "e34150f6-29e7-44cc-b6ee-3f59335be4fd",
+    "status": "available"
+  },
+  "environment": {
+    "recorded": "sha256:bd4c1a0fcf33a9c17f5faf33ce4f981253b5a5e478015254dff265248856bb57",
+    "current": "sha256:034c81a5d7e1f441a9bb63ae1e73f9b28fd87203e335ce4357daf11f96a721ac",
+    "match": "different",
+    "differences": {
+      "edition": [
+        "web",
+        "desktop"
+      ],
+      "edition_version": [
+        "0.9.0",
+        "1.3.0"
+      ],
+      "h5py": [
+        "3.11.0",
+        "3.16.0"
+      ],
+      "machine": [
+        "wasm32",
+        "AMD64"
+      ],
+      "numpy": [
+        "1.26.4",
+        "2.4.4"
+      ],
+      "platform": [
+        "emscripten",
+        "win32"
+      ],
+      "pyodide": [
+        "0.26.4",
+        null
+      ],
+      "python.version": [
+        "3.12.1",
+        "3.11.6"
+      ],
+      "scipy": [
+        "1.12.0",
+        "1.16.3"
+      ]
+    }
+  },
+  "verdict": "exact",
+  "rule": {
+    "kind": "exact"
+  },
+  "observed": {
+    "mismatches": 0,
+    "max_abs_error": 0.0,
+    "max_rel_error": 0.0,
+    "undefined_abs_errors": 0,
+    "undefined_rel_errors": 0,
+    "dtype_match": true,
+    "shape_match": true,
+    "roi_match": true
+  },
+  "verification_activity": {
+    "origin": "verification",
+    "outputs": [
+      {
+        "role": "result",
+        "state_id": "327c8a07-300c-400b-b362-2c2bf3f69adc",
+        "locator": null
+      }
+    ]
+  },
+  "context": {
+    "roi": null,
+    "mask": null,
+    "x_alignment": null,
+    "options": {
+      "auto_normalize_kernel": false
+    }
+  },
+  "outputs": [
+    {
+      "role": "result",
+      "recorded": "state",
+      "state_id": "e34150f6-29e7-44cc-b6ee-3f59335be4fd",
+      "status": "available",
+      "verdict": "exact",
+      "rule": {
+        "kind": "exact"
+      },
+      "observed": {
+        "mismatches": 0,
+        "max_abs_error": 0.0,
+        "max_rel_error": 0.0,
+        "undefined_abs_errors": 0,
+        "undefined_rel_errors": 0,
+        "dtype_match": true,
+        "shape_match": true,
+        "roi_match": true
+      },
+      "detail": null
+    }
+  ]
+}

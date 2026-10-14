@@ -1,0 +1,82 @@
+{
+  "report": "datalab-verification-report",
+  "report_version": 1,
+  "activity_id": "e8f7a366-5340-45d3-a5e2-921eff0cb7ca",
+  "restoration": "replayable",
+  "eligibility": "ready",
+  "reason": null,
+  "inputs": [
+    {
+      "role": "source",
+      "state_id": "ed113dca-98c9-4b77-a2ac-a59d4295d1ed",
+      "status": "available"
+    }
+  ],
+  "reference": null,
+  "environment": {
+    "recorded": "sha256:bd4c1a0fcf33a9c17f5faf33ce4f981253b5a5e478015254dff265248856bb57",
+    "current": "sha256:034c81a5d7e1f441a9bb63ae1e73f9b28fd87203e335ce4357daf11f96a721ac",
+    "match": "different",
+    "differences": {
+      "edition": [
+        "web",
+        "desktop"
+      ],
+      "edition_version": [
+        "0.9.0",
+        "1.3.0"
+      ],
+      "h5py": [
+        "3.11.0",
+        "3.16.0"
+      ],
+      "machine": [
+        "wasm32",
+        "AMD64"
+      ],
+      "numpy": [
+        "1.26.4",
+        "2.4.4"
+      ],
+      "platform": [
+        "emscripten",
+        "win32"
+      ],
+      "pyodide": [
+        "0.26.4",
+        null
+      ],
+      "python.version": [
+        "3.12.1",
+        "3.11.6"
+      ],
+      "scipy": [
+        "1.12.0",
+        "1.16.3"
+      ]
+    }
+  },
+  "verdict": "exact",
+  "rule": null,
+  "observed": null,
+  "verification_activity": {
+    "origin": "verification",
+    "outputs": []
+  },
+  "context": {
+    "roi": null,
+    "mask": null,
+    "x_alignment": null
+  },
+  "outputs": [
+    {
+      "role": "result",
+      "recorded": "none",
+      "status": "available",
+      "verdict": "exact",
+      "rule": null,
+      "observed": null,
+      "detail": null
+    }
+  ]
+}
