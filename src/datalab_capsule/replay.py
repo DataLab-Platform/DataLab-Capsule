@@ -33,11 +33,16 @@ class IneligibleError(ProvenanceError):
     Args:
         code: Eligibility code (e.g. ``"unsupported_contract"``).
         message: Human-readable detail.
+        changed: Positions of the inputs found changed (``input_changed``), whose
+         status is then ``changed``; the other inputs are ``unsupported``.
     """
 
-    def __init__(self, code: str, message: str = "") -> None:
+    def __init__(
+        self, code: str, message: str = "", changed: tuple[int, ...] = ()
+    ) -> None:
         super().__init__(message or code)
         self.code = code
+        self.changed = tuple(changed)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -107,7 +112,8 @@ def prepare_activity(
          :class:`IneligibleError` (``invalid_parameters``).
         state_status: Statuses derived at load (``altered``, ``unavailable``).
         apply_context: ``(contract, objects, recorded context) -> call inputs``;
-         raises :class:`IneligibleError` (``unsupported_context``) when the
+         raises :class:`IneligibleError` (``unsupported_context``, or
+         ``input_changed`` with the positions of the changed inputs) when the
          recorded context cannot be applied. Defaults to the live objects.
 
     Returns:
@@ -188,8 +194,13 @@ def prepare_activity(
         try:
             call_inputs = apply_context(contract, live, activity.get("context") or {})
         except IneligibleError as exc:
-            for entry in checked:
-                entry["status"] = "unsupported"
+            for position, entry in enumerate(checked):
+                if exc.changed:
+                    entry["status"] = (
+                        "changed" if position in exc.changed else "available"
+                    )
+                else:
+                    entry["status"] = "unsupported"
             return refuse(exc.code, str(exc), checked)
     try:
         parameters = decode_parameters(contract, call["parameters"])

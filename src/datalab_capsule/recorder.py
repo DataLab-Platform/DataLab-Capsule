@@ -44,6 +44,7 @@ from datalab_capsule.integrity import (
     roi_facts,
     signal_rows,
     state_facts,
+    value_digest,
 )
 from datalab_capsule.ledger import Ledger, artifact_status, utc_timestamp
 from datalab_capsule.legacy import (
@@ -184,6 +185,11 @@ def computation_from_sigima(contracts: Any) -> Computation:
         ),
         qualification_status=lambda contract: contract.qualification_status,
     )
+
+
+def _metadata_digest(obj: Any, read: dict[str, Any]) -> str:
+    """Return the digest of the metadata value *read* of *obj* (None if absent)."""
+    return value_digest(obj.metadata.get(read["key"]))
 
 
 def comparison_rows(obj: Any, kind: str) -> dict[str, Any]:
@@ -420,13 +426,16 @@ class Recorder:
         state_ids: list[str],
         objs: list[Any],
         roles: Sequence[str],
+        executed: Sequence[Any] | None = None,
     ) -> tuple[dict[str, Any], list[str], dict[str, Any], dict[str, Any]]:
         """Return the call, limits, implementation and context of an execution.
 
         The identity of the operation is kept as soon as the computation library
         knows it, whether or not its contract is qualified for replay: the
         qualification is checked when replaying, against the local library. The
-        context holds the global options read by the computation, if any.
+        context holds the global options read by the computation, if any, and
+        the digests of the metadata of inputs it reads (see
+        :meth:`_metadata_read`), taken from *executed* when given.
         """
         description = self.computation.describe_call(func, objs, param, roles=roles)
         operation = description["operation"] or {}
@@ -437,7 +446,14 @@ class Recorder:
             list(zip(description["roles"], state_ids)),
         )
         options = description.get("options")
-        context = {"options": dict(options)} if options else {}
+        context: dict[str, Any] = {"options": dict(options)} if options else {}
+        reads = description.get("metadata_read") or []
+        if reads:
+            sources = objs if executed is None else list(executed)
+            context["metadata"] = [
+                {**read, "digest": _metadata_digest(sources[read["position"]], read)}
+                for read in reads
+            ]
         return (
             call,
             list(description["limits"]),
@@ -456,6 +472,7 @@ class Recorder:
         roles: Sequence[str] | None = None,
         limits: Sequence[str] = (),
         context: dict[str, Any] | None = None,
+        executed: Sequence[Any] | None = None,
     ) -> PendingActivity | None:
         """Record the input states of an execution, before it runs.
 
@@ -473,6 +490,10 @@ class Recorder:
             context: Execution context of the prepared computation (X alignment,
              global options), if known before it runs; by default, the global
              options read by the computation (see ``describe_call``).
+            executed: Objects actually passed to the computation, in the order
+             of *source*, when they differ from the recorded inputs (e.g. copies
+             whose metadata were converted before the call): the metadata read
+             by the computation are taken from them.
 
         Returns:
             A pending activity, or None when the execution is not captured.
@@ -490,7 +511,7 @@ class Recorder:
         try:
             state_ids = [self.observe(obj) for obj in objs]
             call, call_limits, implementation, described = self._build_call(
-                func, param, state_ids, objs, roles
+                func, param, state_ids, objs, roles, executed
             )
             pending = PendingActivity(
                 call=call,
@@ -727,6 +748,7 @@ class Recorder:
         holder: dict[str, Any] = {}
 
         def apply_context(contract: Any, objs: list[Any], context: dict) -> list[Any]:
+            self._check_metadata_read(contract, objs, context)
             try:
                 prepared = self.computation.prepare_execution(
                     contract,
@@ -751,6 +773,50 @@ class Recorder:
             apply_context=apply_context,
         )
         return result, holder.get("prepared")
+
+    def _check_metadata_read(
+        self, contract: Any, objs: list[Any], context: dict[str, Any]
+    ) -> None:
+        """Check that the metadata read by the computation are those recorded.
+
+        State fingerprints do not cover metadata: the computation library lists
+        the metadata keys of inputs its contract reads (``metadata_read`` of
+        ``describe_call``), and their digests recorded in the activity context
+        must match the live inputs.
+
+        Raises:
+            IneligibleError: ``unsupported_context`` if they were not recorded,
+             ``input_changed`` (with the changed inputs) if a value changed.
+        """
+        description = self.computation.describe_call(
+            contract.function, objs, None, contract=contract
+        )
+        reads = description.get("metadata_read") or []
+        if not reads:
+            return
+        recorded = {
+            (item.get("position"), item.get("key")): item.get("digest")
+            for item in context.get("metadata") or []
+            if isinstance(item, dict)
+        }
+        changed = []
+        for read in reads:
+            where = (read["position"], read["key"])
+            if where not in recorded:
+                raise IneligibleError(
+                    "unsupported_context",
+                    f"Metadata {read['key']!r} of input {read['role']!r} read by "
+                    "the computation were not recorded",
+                )
+            if _metadata_digest(objs[read["position"]], read) != recorded[where]:
+                changed.append(read)
+        if changed:
+            names = ", ".join(f"{r['key']!r} of input {r['role']!r}" for r in changed)
+            raise IneligibleError(
+                "input_changed",
+                f"Metadata read by the computation changed since the activity: {names}",
+                changed=tuple(sorted({r["position"] for r in changed})),
+            )
 
     def _references(self, activity: dict[str, Any]) -> list[dict[str, Any]]:
         """Return the recorded outputs of an activity with their current status.
