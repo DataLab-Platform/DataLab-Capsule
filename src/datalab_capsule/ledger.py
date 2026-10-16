@@ -285,20 +285,25 @@ class Ledger:
         self._latest[object_uuid] = state_id
         return state_id
 
-    def observe(self, object_uuid: str, facts: dict[str, Any]) -> str:
+    def observe(
+        self, object_uuid: str, facts: dict[str, Any], fresh: bool = False
+    ) -> str:
         """Return the state of an object, reusing its latest state if unchanged.
 
         Args:
             object_uuid: Persistent object identifier.
             facts: State facts, e.g. from
              :func:`datalab_capsule.integrity.signal_state_facts`.
+            fresh: Always create a new state (e.g. when another object now
+             holds this identifier), even if the latest one has the same facts.
 
         Returns:
             State identifier.
         """
         latest = self.latest_state(object_uuid)
         if (
-            latest is not None
+            not fresh
+            and latest is not None
             and facts.get("fingerprint") is not None
             and latest["fingerprint"] == facts["fingerprint"]
             and latest["kind"] == facts["kind"]
