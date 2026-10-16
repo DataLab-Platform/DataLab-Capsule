@@ -300,12 +300,18 @@ def test_deleted_intermediate_keeps_its_description(recorder, workspace, chain):
     """A deleted input stays described and is never substituted."""
     _s0, s1, s2 = chain
     del workspace.objects[s1.uuid]
+    COUNTERS.facts = 0
+    unchecked = recorder.describe_object(s2.uuid)
+    # An absence is reported without checking: nothing has to be read.
+    assert unchecked["production"]["inputs"][0]["data"] == "missing"
+    assert unchecked["anchor"]["content"] == "unchecked" and COUNTERS.facts == 0
     view = recorder.describe_object(s2.uuid, check_data=True)
     (source,) = view["production"]["inputs"]
     assert source["object_present"] is False and source["data"] == "missing"
     ancestor = recorder.describe_state(source["state_id"])
     assert ancestor["object"] == {"object_uuid": s1.uuid, "present": False}
-    assert ancestor["anchor"]["content"] == "unchecked"
+    assert ancestor["anchor"]["content"] == "absent"
+    assert ancestor["production"]["outputs"][0]["status"] == "missing"
     assert ancestor["production"]["parameters"] == {"value": 2.0}
     call = recorder.producing_call(s2.uuid)
     assert call["inputs"] == [

@@ -26,10 +26,11 @@ None of them changes the ledger, the objects or their metadata.
 Anchoring: an object is described from its latest recorded state. The content of
 the object may have changed since; until the data are checked, the description
 says so (``content: "unchecked"``) and never attributes the recorded production
-to the current content. A state without producer is an observed state: it has
-no recorded production. A ``legacy_metadata`` record is shown with its limits;
-its ``observed_state_id`` does not prove that the old computation produced that
-content.
+to the current content. An absent object is reported as such without checking
+the data (nothing has to be read to know it). A state without producer is an
+observed state: it has no recorded production. A ``legacy_metadata`` record is
+shown with its limits; its ``observed_state_id`` does not prove that the old
+computation produced that content.
 """
 
 from __future__ import annotations
@@ -323,7 +324,9 @@ class Inspector:
             and not cycle
             and len(trail) < MAX_DEPTH,
             "cycle": cycle,
-            "data": self._state_check(state, obj) if check_data else "unchecked",
+            "data": self._state_check(state, obj)
+            if check_data or obj is None
+            else "unchecked",
         }
 
     def _output(self, output: Mapping[str, Any], check_data: bool) -> dict[str, Any]:
@@ -336,12 +339,14 @@ class Inspector:
                 "state_id": state["state_id"],
                 "object_uuid": state["object_uuid"],
                 "object_present": obj is not None,
-                "status": self._output_check(state, obj) if check_data else "unchecked",
+                "status": self._output_check(state, obj)
+                if check_data or obj is None
+                else "unchecked",
             }
         artifact = output["artifact"]
         status = "unchecked"
-        if check_data:
-            obj = self.host.find_object(artifact["object_uuid"])
+        obj = self.host.find_object(artifact["object_uuid"])
+        if check_data or obj is None:
             value = None if obj is None else obj.metadata.get(artifact["key"])
             status = artifact_status(artifact, value)
         return {
@@ -363,10 +368,24 @@ class Inspector:
             entry = {k: item.get(k) for k in ("role", "position", "key")}
             if check_data:
                 entry["status"] = self._metadata_check(item, inputs)
+            elif self._metadata_input_absent(item, inputs):
+                entry["status"] = "missing"
             reads.append(entry)
         if reads:
             context["metadata"] = reads
         return context
+
+    def _metadata_input_absent(
+        self, item: Mapping[str, Any], inputs: Sequence[Mapping[str, Any]]
+    ) -> bool:
+        """Return True if the input holding a metadata read no longer exists."""
+        position = item.get("position")
+        if not isinstance(position, int) or not 0 <= position < len(inputs):
+            return False
+        state_id = inputs[position]["binding"].get("state_id")
+        return state_id is not None and (
+            self._holder(self.ledger.states[state_id]) is None
+        )
 
     def _metadata_check(
         self, item: Mapping[str, Any], inputs: Sequence[Mapping[str, Any]]
@@ -491,7 +510,9 @@ class Inspector:
         limits = []
         if len(trail) >= MAX_DEPTH:
             limits.append("depth_limit")
-        content = self._state_check(state, obj) if check_data else "unchecked"
+        content = (
+            self._state_check(state, obj) if check_data or obj is None else "unchecked"
+        )
         content = {
             "available": "matches",
             "changed": "differs",
