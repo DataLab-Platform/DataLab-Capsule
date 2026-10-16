@@ -23,6 +23,7 @@ __all__ = [
     "IneligibleError",
     "Plan",
     "Refusal",
+    "compare_state",
     "prepare_activity",
 ]
 
@@ -83,6 +84,42 @@ class Refusal:
     eligibility: str
     reason: str
     input_statuses: tuple[dict[str, Any], ...] = ()
+
+
+def compare_state(
+    state: Mapping[str, Any],
+    facts: Mapping[str, Any],
+    file_status: str | None = None,
+) -> tuple[str, str]:
+    """Compare the live facts of an object with one of its recorded states.
+
+    This is the single definition of "the same state" used by replay
+    preparation and by inspection: same data fingerprint and same ROI (or the
+    absence of one). Metadata are not covered (see the metadata read by a
+    computation, checked separately).
+
+    Args:
+        state: Recorded state.
+        facts: Live state facts of the object (fingerprint included).
+        file_status: Status of the state derived when the workspace file was
+         opened (``altered``, ``unavailable``), if any.
+
+    Returns:
+        ``(status, reason)``: ``available`` (same state, empty reason),
+        ``unsupported`` (no fingerprint to compare), ``altered`` (the data were
+        altered in the file) or ``changed``.
+    """
+    recorded = state["fingerprint"]
+    if recorded is None or facts.get("fingerprint") is None:
+        return "unsupported", "Input state has no fingerprint"
+    if file_status == "altered":
+        return "altered", "Input data were altered in the file"
+    if facts["fingerprint"] != recorded:
+        return "changed", "Input changed since the activity"
+    recorded_roi = (state.get("roi") or {}).get("digest")
+    if (facts.get("roi") or {}).get("digest") != recorded_roi:
+        return "changed", "Input region of interest changed since the activity"
+    return "available", ""
 
 
 def prepare_activity(
@@ -164,30 +201,13 @@ def prepare_activity(
             entry["status"] = "unsupported"
         return refuse("unsupported_context", f"Precondition failed: {failed}", checked)
     for entry, (_role, state_id, obj) in zip(checked, objects):
-        recorded = ledger.states[state_id]["fingerprint"]
-        facts = observe_object(obj)
-        if recorded is None or facts.get("fingerprint") is None:
-            entry["status"] = "unsupported"
-            return refuse(
-                "unsupported_context", "Input state has no fingerprint", checked
-            )
-        if status.get(state_id) == "altered":
-            entry["status"] = "altered"
-            return refuse(
-                "input_changed", "Input data were altered in the file", checked
-            )
-        if facts["fingerprint"] != recorded:
-            entry["status"] = "changed"
-            return refuse("input_changed", "Input changed since the activity", checked)
-        # A state is the same only when its ROI (or the absence of one) matches.
-        recorded_roi = (ledger.states[state_id].get("roi") or {}).get("digest")
-        if (facts.get("roi") or {}).get("digest") != recorded_roi:
-            entry["status"] = "changed"
-            return refuse(
-                "input_changed",
-                "Input region of interest changed since the activity",
-                checked,
-            )
+        found, reason = compare_state(
+            ledger.states[state_id], observe_object(obj), status.get(state_id)
+        )
+        if found != "available":
+            entry["status"] = found
+            code = "unsupported_context" if found == "unsupported" else "input_changed"
+            return refuse(code, reason, checked)
     live = [obj for _r, _s, obj in objects]
     call_inputs = live
     if apply_context is not None:
