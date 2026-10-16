@@ -15,6 +15,7 @@ import pytest
 
 from datalab_capsule import inspection
 from datalab_capsule.recorder import (
+    APPEND_NOTICE,
     Computation,
     Recorder,
     RecorderHost,
@@ -579,7 +580,7 @@ def test_appended_object_never_inherits_another_provenance(recorder, workspace, 
     other.uuid, other.metadata = s1.uuid, {}
     workspace.objects[s1.uuid] = other
     recorder.load((Ledger(), {}), replaced=False, appended=[other])
-    assert "not supported" in recorder.notices[-1]
+    assert recorder.notices[-1] == APPEND_NOTICE
     view = recorder.describe_object(other.uuid, check_data=True)
     assert view["production"] is None and view["state"]["produced_by"] is None
     assert view["anchor"]["content"] == "matches"

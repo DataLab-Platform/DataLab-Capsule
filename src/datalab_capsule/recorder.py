@@ -61,6 +61,7 @@ from datalab_capsule.legacy import (
 from datalab_capsule.replay import IneligibleError, Plan, Refusal, prepare_activity
 
 __all__ = [
+    "APPEND_NOTICE",
     "CandidateError",
     "Computation",
     "PendingActivity",
@@ -72,6 +73,13 @@ __all__ = [
 ]
 
 _logger = logging.getLogger(__name__)
+
+#: Notice of :meth:`Recorder.load` when a file holding provenance is appended to
+#: the current workspace (editions may show a translation before appending).
+APPEND_NOTICE = (
+    "The data are added, but their earlier provenance is not imported. Open the "
+    "file replacing the current workspace to keep it."
+)
 
 
 class StateUnavailableError(ProvenanceError):
@@ -369,11 +377,8 @@ class Recorder:
         """
         if not replaced:
             if block is not None:
-                message = (
-                    "Provenance import into an existing workspace is not supported yet"
-                )
-                _logger.warning(message)
-                self.notices.append(message)
+                _logger.warning(APPEND_NOTICE)
+                self.notices.append(APPEND_NOTICE)
             self._mark_appended(appended)
             return
         self.reset()
