@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 
 from datalab_capsule.recorder import (
+    APPEND_NOTICE,
     CandidateError,
     Computation,
     Recorder,
@@ -410,7 +411,7 @@ def test_lifecycle_and_legacy_import(workspace) -> None:
     recorder.load(None, replaced=False)
     assert recorder.notices == [] and recorder.file_status is None
     recorder.load((recorder.ledger, {}), replaced=False)
-    assert "not supported" in recorder.notices[0]
+    assert recorder.notices == [APPEND_NOTICE]
     old = workspace.add(signal([5.0, 6.0, 7.0, 8.0]), 5)
     old.metadata["__processing_parameters"] = {
         "func_name": "scale",
