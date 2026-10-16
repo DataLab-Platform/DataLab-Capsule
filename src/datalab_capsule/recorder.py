@@ -39,12 +39,12 @@ from datalab_capsule.compare import (
 )
 from datalab_capsule.environment import collect_environment, environment_id
 from datalab_capsule.hdf5 import load_ledger, save_ledger
+from datalab_capsule.inspection import Inspector, metadata_digest, output_state_status
 from datalab_capsule.integrity import (
     ProvenanceError,
     roi_facts,
     signal_rows,
     state_facts,
-    value_digest,
 )
 from datalab_capsule.ledger import Ledger, artifact_status, utc_timestamp
 from datalab_capsule.legacy import (
@@ -189,7 +189,7 @@ def computation_from_sigima(contracts: Any) -> Computation:
 
 def _metadata_digest(obj: Any, read: dict[str, Any]) -> str:
     """Return the digest of the metadata value *read* of *obj* (None if absent)."""
-    return value_digest(obj.metadata.get(read["key"]))
+    return metadata_digest(obj, read["key"])
 
 
 def comparison_rows(obj: Any, kind: str) -> dict[str, Any]:
@@ -255,11 +255,21 @@ class PendingActivity:
 
 
 class _Deferred:
-    """Pending activities held until temporary outputs get their final UUIDs."""
+    """Pending activities held until temporary outputs get their final UUIDs.
+
+    Attributes:
+        origin: Origin of the activities recorded in this context.
+        items: Held ``(pending activity, temporary output UUID)`` pairs.
+        activity_ids: Identifiers of the activities recorded in this context, in
+         recording order: analyses and executions without result (recorded at
+         once), then the activities recorded by
+         :meth:`Recorder.finalize_deferred`.
+    """
 
     def __init__(self, origin: str) -> None:
         self.origin = origin
         self.items: list[tuple[PendingActivity, str]] = []
+        self.activity_ids: list[str] = []
 
 
 class Recorder:
@@ -284,6 +294,7 @@ class Recorder:
         self.capture_failures = 0
         #: ``"loaded"`` or ``"absent"`` after opening a workspace file, else None.
         self.file_status: str | None = None
+        self._index: Any = None
 
     # -- Workspace lifecycle ------------------------------------------------
 
@@ -294,6 +305,7 @@ class Recorder:
         self.state_status = {}
         self.notices = []
         self._deferred = None
+        self._index = None
 
     @property
     def environment(self) -> dict[str, Any]:
@@ -358,6 +370,7 @@ class Recorder:
         else:
             self.ledger, self.state_status = block
             self.file_status = "loaded"
+            self._index = None
         self._import_legacy(saved_version, current_version)
 
     def _import_legacy(
@@ -608,10 +621,17 @@ class Recorder:
                 key,
                 obj.metadata[key],
             )
-            return self._record(pending, [], origin, artifacts=[artifact])
+            activity = self._record(pending, [], origin, artifacts=[artifact])
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self._capture_failed(exc)
             return None
+        self._note_deferred(activity)
+        return activity
+
+    def _note_deferred(self, activity: dict[str, Any]) -> None:
+        """List an activity recorded at once inside a deferred context."""
+        if self._deferred is not None:
+            self._deferred.activity_ids.append(activity["activity_id"])
 
     def complete_without_result(
         self, pending: PendingActivity | None
@@ -629,10 +649,12 @@ class Recorder:
             return None
         try:
             origin = pending.origin if self._deferred is None else self._deferred.origin
-            return self._record(pending, [], origin)
+            activity = self._record(pending, [], origin)
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self._capture_failed(exc)
             return None
+        self._note_deferred(activity)
+        return activity
 
     def artifact_statuses(self, activity_id: str) -> list[dict[str, str]]:
         """Return the status of each analysis result recorded by an activity.
@@ -682,7 +704,8 @@ class Recorder:
              temporary output is not remapped are dropped.
 
         Returns:
-            Number of recorded activities.
+            Number of recorded activities; their identifiers are appended to
+            ``deferred.activity_ids``.
         """
         recorded = 0
         items, deferred.items = deferred.items, []
@@ -692,17 +715,18 @@ class Recorder:
             if self.host.object_kind(output) is None:
                 continue
             try:
-                self._record(
+                activity = self._record(
                     pending,
                     [("result", final_uuid, self.facts(output))],
                     deferred.origin,
                 )
+                deferred.activity_ids.append(activity["activity_id"])
                 recorded += 1
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 self._capture_failed(exc)
         return recorded
 
-    # -- Replay -------------------------------------------------------------
+    # -- Contracts ----------------------------------------------------------
 
     def _ineligible(self, exc: BaseException) -> IneligibleError:
         code = self.computation.eligibility_code(exc)
@@ -717,10 +741,7 @@ class Recorder:
             IneligibleError: ``unsupported_operation`` (unknown or not
              qualified) or ``unsupported_contract``.
         """
-        try:
-            contract = self.computation.get_contract(operation_id, version)
-        except Exception as exc:  # pylint: disable=broad-exception-caught
-            raise self._ineligible(exc) from exc
+        contract = self.resolve_function(operation_id, version)
         status = self.computation.qualification_status(contract)
         if status != "qualified":
             reason = {
@@ -731,6 +752,88 @@ class Recorder:
                 f"{operation_id} v{version} cannot be replayed: {reason}",
             )
         return contract
+
+    def resolve_function(self, operation_id: str, version: int) -> Any:
+        """Return the contract of a recorded operation known to the local library.
+
+        Unlike :meth:`resolve_contract`, the qualification is not required: an
+        ordinary processing (e.g. a re-application from Processing) may use any
+        known operation; only the verification of a recorded activity needs a
+        qualified contract.
+
+        Raises:
+            IneligibleError: ``unsupported_operation`` or ``unsupported_contract``.
+        """
+        try:
+            return self.computation.get_contract(operation_id, version)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            raise self._ineligible(exc) from exc
+
+    # -- Inspection ---------------------------------------------------------
+
+    def _inspector(self) -> Inspector:
+        """Return an inspector of the current ledger (lookups are cached)."""
+        if not Inspector.index_is_current(self._index, self.ledger):
+            self._index = Inspector.build_index(self.ledger)
+        return Inspector(
+            self.ledger,
+            self.host,
+            self.computation,
+            self.state_status,
+            StateUnavailableError,
+            self._index,
+        )
+
+    def describe_object(
+        self, object_uuid: str, check_data: bool = False
+    ) -> dict[str, Any]:
+        """Describe the provenance of an object (see :mod:`.inspection`).
+
+        Args:
+            object_uuid: Object to describe, anchored on its latest recorded state.
+            check_data: Compare the object and the direct inputs and outputs of
+             its production with their recorded states; never computes.
+        """
+        return self._inspector().describe_object(object_uuid, check_data)
+
+    def describe_state(
+        self,
+        state_id: str,
+        check_data: bool = False,
+        trail: Sequence[str] = (),
+    ) -> dict[str, Any]:
+        """Describe a recorded state, e.g. an input to expand.
+
+        Raises:
+            KeyError: If the state does not exist.
+        """
+        return self._inspector().describe_state(state_id, check_data, trail)
+
+    def describe_activity(
+        self, activity_id: str, check_data: bool = False
+    ) -> dict[str, Any]:
+        """Describe one recorded activity (e.g. from a History action).
+
+        Raises:
+            KeyError: If the activity does not exist.
+        """
+        return self._inspector().describe_activity(activity_id, check_data)
+
+    def producing_call(self, object_uuid: str) -> dict[str, Any] | None:
+        """Return the call that produced the latest recorded state of an object.
+
+        See :meth:`datalab_capsule.inspection.Inspector.producing_call`; the
+        operation is resolved with :meth:`resolve_function`.
+        """
+        return self._inspector().producing_call(
+            object_uuid, self.resolve_function, IneligibleError
+        )
+
+    def command_activity_ids(self, command_id: str) -> list[str]:
+        """Return the activities recorded for one command, in recording order."""
+        return self._inspector().command_activity_ids(command_id)
+
+    # -- Replay -------------------------------------------------------------
 
     def prepare(self, activity_id: str) -> Plan | Refusal:
         """Prepare a recorded activity for replay (no GUI selection needed)."""
@@ -832,23 +935,16 @@ class Recorder:
             if "state_id" in output:
                 state = self.ledger.states[output["state_id"]]
                 obj = self.host.find_object(state["object_uuid"])
-                status = "available"
-                if (
-                    obj is None
-                    or self.state_status.get(state["state_id"]) == "unavailable"
-                ):
-                    status, obj = "missing", None
-                elif self.state_status.get(state["state_id"]) == "altered" or (
-                    self.facts(obj)["fingerprint"] != state["fingerprint"]
-                ):
-                    status = "altered"
+                status = output_state_status(
+                    state, obj, self.facts, self.state_status.get(state["state_id"])
+                )
                 references.append(
                     {
                         "role": output["role"],
                         "recorded": "state",
                         "state_id": state["state_id"],
                         "status": status,
-                        "value": obj,
+                        "value": None if status == "missing" else obj,
                     }
                 )
                 continue
