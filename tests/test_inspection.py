@@ -566,3 +566,37 @@ def test_command_and_deferred_activity_ids(recorder, workspace) -> None:
     replayed = recorder.ledger.latest_state(first.uuid)["produced_by"]
     assert deferred.activity_ids[-1] == replayed
     assert recorder.ledger.activity(replayed)["origin"] == "history_replay"
+
+
+def test_appended_object_never_inherits_another_provenance(recorder, workspace, chain):
+    """An appended object holding a known identifier starts a new history."""
+    from datalab_capsule.ledger import Ledger  # pylint: disable=C0415
+
+    _s0, s1, s2 = chain
+    del workspace.objects[s1.uuid]
+    # Same identifier and same content as the deleted object.
+    other = signal(s1.y.copy(), x=s1.x.copy())
+    other.uuid, other.metadata = s1.uuid, {}
+    workspace.objects[s1.uuid] = other
+    recorder.load((Ledger(), {}), replaced=False, appended=[other])
+    assert "not supported" in recorder.notices[-1]
+    view = recorder.describe_object(other.uuid, check_data=True)
+    assert view["production"] is None and view["state"]["produced_by"] is None
+    assert view["anchor"]["content"] == "matches"
+    assert [s["state_id"] for s in view["object_states"]] == [view["state"]["state_id"]]
+    assert inspection.IDENTITY_LIMIT in view["limits"]
+    assert view["analyses"] == [] and view["legacy"] == []
+    assert recorder.producing_call(other.uuid) is None
+    # The input of S2 was the deleted object: it is not replaced by the new one.
+    (source,) = recorder.describe_object(s2.uuid, check_data=True)["production"][
+        "inputs"
+    ]
+    assert source["object_present"] is False and source["data"] == "missing"
+    assert recorder.producing_call(s2.uuid)["inputs"][0]["present"] is False
+    # Processing of the appended object is recorded as usual.
+    out = run(recorder, workspace, gauss, 1.0, other)
+    (used,) = recorder.describe_object(out.uuid)["production"]["inputs"]
+    assert used["state_id"] == view["state"]["state_id"]
+    assert used["object_present"] is True
+    recorder.ledger.validate()
+    assert recorder.capture_failures == 0

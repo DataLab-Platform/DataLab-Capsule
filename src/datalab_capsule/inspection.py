@@ -45,6 +45,7 @@ from datalab_capsule.ledger import Ledger, artifact_status
 from datalab_capsule.replay import compare_state
 
 __all__ = [
+    "IDENTITY_LIMIT",
     "INSPECTION_VERSION",
     "MAX_ANALYSES",
     "MAX_DEPTH",
@@ -67,6 +68,10 @@ MAX_INPUTS = 200
 MAX_ANALYSES = 50
 #: Recorded states listed per object (the latest ones).
 MAX_OBJECT_STATES = 20
+#: Limit of an observed state recorded when an appended object holds an
+#: identifier already known to the ledger: what was recorded before for this
+#: identifier concerns another object and is never attributed to it.
+IDENTITY_LIMIT = "appended_without_provenance"
 
 
 def metadata_digest(obj: Any, key: str) -> str:
@@ -110,6 +115,13 @@ class _Index:
         for state_id in sorted(states, key=lambda k: states[k].get("sequence", 0)):
             by_object.setdefault(states[state_id]["object_uuid"], []).append(state_id)
         self.object_states = by_object
+        #: Object UUID -> sequence of its latest identity break (see
+        #: :data:`IDENTITY_LIMIT`): earlier states belong to another object.
+        self.breaks: dict[str, int] = {}
+        for object_uuid, state_ids in by_object.items():
+            for state_id in state_ids:
+                if IDENTITY_LIMIT in (states[state_id].get("limits") or []):
+                    self.breaks[object_uuid] = states[state_id].get("sequence", 0)
         self.analyses: dict[str, list[str]] = {}
         self.legacy: dict[str, list[str]] = {}
         self.commands: dict[str, list[str]] = {}
@@ -187,6 +199,18 @@ class Inspector:
         )
 
     # -- Data checks ------------------------------------------------------
+
+    def _holder(self, state: Mapping[str, Any]) -> Any:
+        """Return the live object of a recorded state, or None.
+
+        An object that took over the identifier of the state after an identity
+        break (see :data:`IDENTITY_LIMIT`) is not the object of that state.
+        """
+        object_uuid = state["object_uuid"]
+        identity_break = self.index.breaks.get(object_uuid)
+        if identity_break is not None and state.get("sequence", 0) < identity_break:
+            return None
+        return self.host.find_object(object_uuid)
 
     def _live_facts(self, obj: Any) -> Any:
         """Return the state facts of *obj*, once per description."""
@@ -285,7 +309,7 @@ class Inspector:
                 "data": "unknown",
             }
         state = self.ledger.states[state_id]
-        obj = self.host.find_object(state["object_uuid"])
+        obj = self._holder(state)
         cycle = state_id in trail
         producer = state["produced_by"]
         return {
@@ -305,7 +329,7 @@ class Inspector:
     def _output(self, output: Mapping[str, Any], check_data: bool) -> dict[str, Any]:
         if "state_id" in output:
             state = self.ledger.states[output["state_id"]]
-            obj = self.host.find_object(state["object_uuid"])
+            obj = self._holder(state)
             return {
                 "role": output["role"],
                 "recorded": "state",
@@ -353,7 +377,7 @@ class Inspector:
         state_id = inputs[position]["binding"].get("state_id")
         if state_id is None:
             return "unknown"
-        obj = self.host.find_object(self.ledger.states[state_id]["object_uuid"])
+        obj = self._holder(self.ledger.states[state_id])
         if obj is None:
             return "missing"
         same = metadata_digest(obj, item.get("key")) == item.get("digest")
@@ -462,7 +486,7 @@ class Inspector:
         """
         state = self.ledger.states[state_id]
         object_uuid = state["object_uuid"]
-        obj = self.host.find_object(object_uuid)
+        obj = self._holder(state)
         latest = self.ledger.latest_state(object_uuid)
         limits = []
         if len(trail) >= MAX_DEPTH:
@@ -479,7 +503,7 @@ class Inspector:
         trail = [*trail, state_id]
         return {
             "inspection": INSPECTION_VERSION,
-            "object": self._object(object_uuid),
+            "object": {"object_uuid": object_uuid, "present": obj is not None},
             "state": self._state_summary(state),
             "anchor": {
                 "latest": latest is not None and latest["state_id"] == state_id,
@@ -518,6 +542,16 @@ class Inspector:
         else:
             description = self.describe_state(latest["state_id"], check_data)
         states = self.index.object_states.get(object_uuid, [])
+        identity_break = self.index.breaks.get(object_uuid)
+        if identity_break is not None:
+            # What was recorded before concerns another object.
+            states = [
+                s
+                for s in states
+                if self.ledger.states[s].get("sequence", 0) >= identity_break
+            ]
+            description["limits"].append(IDENTITY_LIMIT)
+        kept = set(states)
         description["object_states"] = [
             {
                 "state_id": state_id,
@@ -528,11 +562,24 @@ class Inspector:
         ]
         if len(states) > MAX_OBJECT_STATES:
             description["limits"].append("object_states_truncated")
-        description["legacy"] = [
-            self.describe_activity(act_id)
-            for act_id in self.index.legacy.get(object_uuid, [])
-        ]
+        legacy = self.index.legacy.get(object_uuid, [])
         analyses = self.index.analyses.get(object_uuid, [])
+        if identity_break is not None:
+            legacy = [
+                act_id
+                for act_id in legacy
+                if self.ledger.activity(act_id)["legacy"].get("observed_state_id")
+                in kept
+            ]
+            analyses = [
+                act_id
+                for act_id in analyses
+                if any(
+                    item["binding"].get("state_id") in kept
+                    for item in self.ledger.activity(act_id)["call"]["inputs"]
+                )
+            ]
+        description["legacy"] = [self.describe_activity(act_id) for act_id in legacy]
         if len(analyses) > MAX_ANALYSES:
             description["limits"].append("analyses_truncated")
         description["analyses"] = [
@@ -595,13 +642,12 @@ class Inspector:
         inputs = []
         for item in call["inputs"]:
             input_state = self.ledger.states[item["binding"]["state_id"]]
-            uid = input_state["object_uuid"]
             inputs.append(
                 {
                     "role": item["role"],
                     "state_id": input_state["state_id"],
-                    "object_uuid": uid,
-                    "present": self.host.find_object(uid) is not None,
+                    "object_uuid": input_state["object_uuid"],
+                    "present": self._holder(input_state) is not None,
                 }
             )
         return {

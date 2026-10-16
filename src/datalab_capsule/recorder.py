@@ -39,7 +39,12 @@ from datalab_capsule.compare import (
 )
 from datalab_capsule.environment import collect_environment, environment_id
 from datalab_capsule.hdf5 import load_ledger, save_ledger
-from datalab_capsule.inspection import Inspector, metadata_digest, output_state_status
+from datalab_capsule.inspection import (
+    IDENTITY_LIMIT,
+    Inspector,
+    metadata_digest,
+    output_state_status,
+)
 from datalab_capsule.integrity import (
     ProvenanceError,
     roi_facts,
@@ -342,6 +347,7 @@ class Recorder:
         replaced: bool,
         saved_version: str | None = None,
         current_version: str | None = None,
+        appended: Iterable[Any] = (),
     ) -> None:
         """Adopt the ledger read from a workspace file, after its objects.
 
@@ -355,6 +361,11 @@ class Recorder:
              ledgers are not merged and the file's block is ignored.
             saved_version: Application version that saved the file, as stored.
             current_version: Version compared with *saved_version*, or None.
+            appended: Objects added to the workspace by an appended file. Those
+             holding an identifier already known to the ledger (e.g. the
+             identifier of a deleted object) get a new observed state marked
+             with :data:`~datalab_capsule.inspection.IDENTITY_LIMIT`: nothing
+             recorded before is attributed to them.
         """
         if not replaced:
             if block is not None:
@@ -363,6 +374,7 @@ class Recorder:
                 )
                 _logger.warning(message)
                 self.notices.append(message)
+            self._mark_appended(appended)
             return
         self.reset()
         if block is None:
@@ -372,6 +384,27 @@ class Recorder:
             self.file_status = "loaded"
             self._index = None
         self._import_legacy(saved_version, current_version)
+
+    def _mark_appended(self, objects: Iterable[Any]) -> None:
+        """Break the identity of appended objects whose UUID the ledger knows."""
+        try:
+            known = set(self.ledger.object_uuids())
+            for obj in objects:
+                uid = self.host.object_uuid(obj)
+                if (
+                    uid is None
+                    or uid not in known
+                    or self.host.object_kind(obj) is None
+                ):
+                    continue
+                try:
+                    facts = self.facts(obj)
+                except StateUnavailableError:
+                    continue
+                facts["limits"] = [*facts.get("limits", []), IDENTITY_LIMIT]
+                self.ledger.observe(uid, facts, fresh=True)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self._capture_failed(exc)
 
     def _import_legacy(
         self, saved_version: str | None, current_version: str | None
