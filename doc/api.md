@@ -35,6 +35,21 @@ changes = diff_manifests(old.manifest, new.manifest)
 | `review.validate_review(review, manifest=None)` | Check the schema, the review's own fingerprint and, when given, that it targets *manifest*. Raises `ReviewError`. |
 | `review.review_fingerprint(review)` | Fingerprint of a review without its own fingerprint. |
 
+## Capsule interfaces (used by the editions)
+
+`exchange` holds what the capsule dialogs of DataLab Desktop and DataLab-Web need beyond reading and verifying, so that both give the same answers. Nothing is computed.
+
+| Function | Purpose |
+| --- | --- |
+| `exchange.inspect_capsule(data, *, workspace=None, reports=(), reviews=(), policy=...)` | Inspect a capsule with the supplied workspace (referenced), reports and reviews (JSON texts). Returns `summary` and `manifest` (None when unreadable), `integrity` (`valid`, `fingerprint`, `workspace`, `states_located`, `states_altered`, `problems`; the problems of supplied documents are not integrity problems) and `documents` (`reports`, `reviews`, `unreadable`, each with its `status`). |
+| `exchange.open_capsule(data, workspace=None, policy=...)` | Return `(workspace bytes, origin)`. Raises `CapsuleError` for a referenced workspace not supplied or not matching. |
+| `exchange.capsule_origin(manifest)` | `{fingerprint, name, attachments}`: what an edition keeps of the capsule a workspace was opened from (the parent of a later revision). |
+| `exchange.capsule_attachment(data, name, policy=...)` | Checked bytes of one attachment, for an explicit download (never opened). |
+| `exchange.check_registry_revision(manifest, fingerprint, reviews=())` | Check a manifest returned by a registry (valid, the requested fingerprint) and each review. Returns `summary`, `manifest`, `reviews` (`{review, status}`). |
+| `exchange.diff_checked_manifests(old, new)` | Validate both manifests, then `diff.diff_manifests`. |
+| `exchange.review_of(manifest, *, reviewer, statement, verdict=None, reports=())` | Validate the manifest, then `review.create_review`. |
+| `exchange.attachment_name(filename, taken=())` | Attachment name allowed by the profile, unique among *taken*. |
+
 ## Workspace provenance (used by the editions)
 
 | Function | Purpose |
@@ -83,7 +98,7 @@ changes = diff_manifests(old.manifest, new.manifest)
 
 Errors: 401 without the token for a write, 404 for an unknown revision, attachment or review (`RegistryNotFound`), 413 for an oversized body, 422 for an invalid document or fingerprint (`RegistryError`).
 
-Client (standard library): `registry_client.RegistryClient(url, token=None)` with `list_revisions()`, `get_manifest(fingerprint)`, `list_reviews(fingerprint)`, `get_attachment(fingerprint, name, max_bytes=16 MiB)` (unchecked bytes) and `publish_capsule(capsule, reviews=())` (manifest, attachments, reviews; never the workspace); `registry_client.fetch_revision(client, fingerprint)` returns the manifest checked against the fingerprint, each review with its status and each declared attachment checked against its size and SHA-256. Each response is read up to a limit and refused beyond it: 16 MiB for a listing (`MAX_LISTING_BYTES`), the registry's manifest limit for a manifest, the declared size for an attachment fetched by `fetch_revision`, 64 KiB for other replies and errors (`MAX_REPLY_BYTES`). Errors raise `RegistryClientError`.
+Client (standard library): `registry_client.RegistryClient(url, token=None)` with `status()`, `list_revisions()`, `get_manifest(fingerprint)`, `list_reviews(fingerprint)`, `get_attachment(fingerprint, name, max_bytes=16 MiB)` (unchecked bytes), `get_checked_attachment(fingerprint, name, sha256, size)` (checked against the SHA-256 and size of the checked manifest), `publish_manifest(manifest)`, `upload_attachment(fingerprint, name, data)`, `publish_review(review)` and `publish_capsule(capsule, reviews=())` (manifest, attachments, reviews; never the workspace); `registry_client.fetch_revision(client, fingerprint)` returns the manifest checked against the fingerprint, each review with its status and each declared attachment checked against its size and SHA-256. Each response is read up to a limit and refused beyond it: 16 MiB for a listing (`MAX_LISTING_BYTES`), the registry's manifest limit for a manifest, the declared size for an attachment fetched by `fetch_revision`, 64 KiB for other replies and errors (`MAX_REPLY_BYTES`). Errors raise `RegistryClientError`.
 
 ## Schemas
 
