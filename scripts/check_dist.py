@@ -4,32 +4,56 @@
 
 Usage::
 
-    python scripts/check_dist.py DIST_DIR [--version X.Y.Z]
+    python scripts/check_dist.py DIST_DIR [--version X.Y.Z] [--profile DIR]
 
 Checks that DIST_DIR holds exactly one wheel and one sdist of the same version
 (equal to ``--version`` when given, e.g. the tag without its ``v``), that the
-wheel carries the package data (schemas, RO-Crate context), the licence and the
-two commands, declares the expected base requirements and the ``hdf5`` and
-``registry`` extras, and holds no tests, and
-that the sdist carries the sources, tests, corpus and documentation. Prints
-what it checked and exits with 1 on the first problem.
+wheel carries every module of the package (including ``exchange``, used by the
+capsule interfaces of both editions), the package data (schemas, RO-Crate
+context), the licence and the two commands, declares the expected base
+requirements and the ``hdf5`` and ``registry`` extras, and holds no tests, and
+that the sdist carries the sources, tests, corpus and documentation. With
+``--profile``, also checks that the schemas and context of the wheel have the
+SHA-256 published by the profile page in DIR (see ``check_profile.py``).
+Prints what it checked and exits with 1 on the first problem.
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import sys
 import tarfile
 import zipfile
 from email.parser import Parser
 from pathlib import Path
 
+MODULES = (
+    "__init__",
+    "_schema",
+    "archive",
+    "calls",
+    "cli",
+    "compare",
+    "diff",
+    "environment",
+    "exchange",
+    "hdf5",
+    "inspection",
+    "integrity",
+    "ledger",
+    "legacy",
+    "manifest",
+    "recorder",
+    "registry",
+    "registry_app",
+    "registry_client",
+    "replay",
+    "review",
+    "verify",
+)
 WHEEL_FILES = (
-    "datalab_capsule/__init__.py",
-    "datalab_capsule/cli.py",
-    "datalab_capsule/registry.py",
-    "datalab_capsule/registry_app.py",
-    "datalab_capsule/registry_client.py",
+    *(f"datalab_capsule/{module}.py" for module in MODULES),
     "datalab_capsule/schemas/ledger-1.schema.json",
     "datalab_capsule/schemas/report-1.schema.json",
     "datalab_capsule/schemas/review-1.schema.json",
@@ -65,8 +89,8 @@ def _normalise(requirement: str) -> str:
     return " ".join(requirement.replace(">=", " >= ").split()).replace("; ", "; ")
 
 
-def check(dist: Path, version: str | None) -> None:
-    """Run every check on the distributions found in *dist*."""
+def check(dist: Path, version: str | None) -> Path:
+    """Run every check on the distributions found in *dist*; return the wheel."""
     wheels = sorted(dist.glob("datalab_capsule-*.whl"))
     sdists = sorted(dist.glob("datalab_capsule-*.tar.gz"))
     if len(wheels) != 1 or len(sdists) != 1:
@@ -116,6 +140,22 @@ def check(dist: Path, version: str | None) -> None:
         if not corpus:
             _fail("sdist lacks the fixture corpus")
     print(f"sdist: {len(names)} files, sources, tests and {len(corpus)} valid fixtures")
+    return wheel
+
+
+def check_profile(wheel: Path, profile: Path) -> None:
+    """Compare the resources of *wheel* with the profile page in *profile*."""
+    path = Path(__file__).with_name("check_profile.py")
+    spec = importlib.util.spec_from_file_location("check_profile", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    index = (profile / "index.html").read_text(encoding="utf-8")
+    problems = module.compare(
+        module.package_resources(wheel), index, module.package_resources(profile)
+    )
+    if problems:
+        _fail(f"profile resources: {problems}")
+    print(f"wheel resources match the profile in {profile}")
 
 
 def main() -> None:
@@ -123,8 +163,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("dist", type=Path)
     parser.add_argument("--version")
+    parser.add_argument("--profile", type=Path, metavar="DIR")
     args = parser.parse_args()
-    check(args.dist, args.version)
+    wheel = check(args.dist, args.version)
+    if args.profile is not None:
+        check_profile(wheel, args.profile)
     print("Distributions OK")
 
 
