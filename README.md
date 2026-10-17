@@ -97,6 +97,7 @@ Reading is open; publishing needs `Authorization: Bearer <token>` when a token i
 
 - [Two-operator scenario](doc/scenario.md): DataLab Desktop and DataLab-Web, without server and with a registry
 - [Interoperability report](doc/interoperability.md): what the editions exchange, check and replay, findings and limits
+- [Performance and capacity](doc/performance.md): how costs are measured, results and recommended sizes
 - [Developer notes](doc/development.md) and [deployment notes](doc/deployment.md) (registry, profile pages)
 - [Identity, compatibility and restoration rules](doc/rules.md)
 - [API](doc/api.md)
@@ -122,12 +123,14 @@ npm install
 node run_pyodide.mjs ..\..\dist\datalab_capsule-0.1.0.dev0-py3-none-any.whl
 ```
 
-Cost of image fingerprints (time and peak memory), in CPython and in Pyodide:
+Cost of fingerprints and of capsules (time and memory), in CPython and in Pyodide (see [performance](doc/performance.md)):
 
 ```powershell
-.\.venv\Scripts\python.exe benchmarks\fingerprint_cost.py
+.\.venv\Scripts\python.exe -m pip install -r benchmarks\requirements.txt
+.\.venv\Scripts\python.exe benchmarks\fingerprint_cost.py --profile quick --output build\bench\fingerprints.json
+.\.venv\Scripts\python.exe benchmarks\capsule_cost.py --profile representative --output build\bench\capsules.json
 cd tests\pyodide
-node run_benchmark.mjs ..\..\dist\datalab_capsule-0.1.0.dev0-py3-none-any.whl
+node run_benchmark.mjs ..\..\dist\datalab_capsule-0.1.0.dev0-py3-none-any.whl capsule_cost.py --profile quick --output ..\..\build\bench\capsules-pyodide.json
 ```
 
 ## License

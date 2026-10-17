@@ -1,0 +1,4 @@
+# Benchmark dependencies, on top of the package with its hdf5 and registry extras
+# (pip install -e ".[hdf5,registry]" -r benchmarks/requirements.txt). They are
+# not dependencies of DataLab-Capsule.
+psutil >= 5.8
