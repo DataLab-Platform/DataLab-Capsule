@@ -53,6 +53,8 @@ __all__ = [
     "MAX_INPUTS",
     "MAX_OBJECT_STATES",
     "Inspector",
+    "holder_of_artifact",
+    "holder_of_state",
     "metadata_digest",
     "output_state_status",
 ]
@@ -153,6 +155,53 @@ class _Index:
             for holder in dict.fromkeys(holders):
                 self.analyses.setdefault(holder, []).append(act_id)
 
+    def is_before_break(self, object_uuid: str, sequence: int) -> bool:
+        """Return True if a state of *object_uuid* recorded at *sequence*
+        precedes an identity break (its object is not the live one)."""
+        identity_break = self.breaks.get(object_uuid)
+        return identity_break is not None and sequence < identity_break
+
+
+def holder_of_state(index: _Index, find_object: Any, state: Mapping[str, Any]) -> Any:
+    """Return the live object of a recorded state, or None.
+
+    The single rule used to consult, check and verify: an object that took
+    over the identifier of the state after an identity break (see
+    :data:`IDENTITY_LIMIT`) is not the object of that state.
+
+    Args:
+        index: Lookups of the ledger (see :class:`Inspector`).
+        find_object: ``object_uuid -> live object or None`` of the host.
+        state: Recorded state.
+    """
+    if index.is_before_break(state["object_uuid"], state.get("sequence", 0)):
+        return None
+    return find_object(state["object_uuid"])
+
+
+def holder_of_artifact(
+    index: _Index,
+    find_object: Any,
+    ledger: Ledger,
+    activity: Mapping[str, Any],
+    artifact: Mapping[str, Any],
+) -> Any:
+    """Return the live object holding an analysis result, or None.
+
+    An analysis stores its result in the object it analysed: when that input
+    state precedes an identity break, the live object holding the identifier
+    is another object, which does not hold this result.
+    """
+    object_uuid = artifact["object_uuid"]
+    for item in activity["call"]["inputs"]:
+        state_id = item["binding"].get("state_id")
+        if state_id is None:
+            continue
+        state = ledger.states[state_id]
+        if state["object_uuid"] == object_uuid:
+            return holder_of_state(index, find_object, state)
+    return find_object(object_uuid)
+
 
 class Inspector:
     """Builds the provenance description of states, activities and objects.
@@ -207,11 +256,7 @@ class Inspector:
         An object that took over the identifier of the state after an identity
         break (see :data:`IDENTITY_LIMIT`) is not the object of that state.
         """
-        object_uuid = state["object_uuid"]
-        identity_break = self.index.breaks.get(object_uuid)
-        if identity_break is not None and state.get("sequence", 0) < identity_break:
-            return None
-        return self.host.find_object(object_uuid)
+        return holder_of_state(self.index, self.host.find_object, state)
 
     def _live_facts(self, obj: Any) -> Any:
         """Return the state facts of *obj*, once per description."""
@@ -329,7 +374,12 @@ class Inspector:
             else "unchecked",
         }
 
-    def _output(self, output: Mapping[str, Any], check_data: bool) -> dict[str, Any]:
+    def _output(
+        self,
+        activity: Mapping[str, Any],
+        output: Mapping[str, Any],
+        check_data: bool,
+    ) -> dict[str, Any]:
         if "state_id" in output:
             state = self.ledger.states[output["state_id"]]
             obj = self._holder(state)
@@ -345,7 +395,9 @@ class Inspector:
             }
         artifact = output["artifact"]
         status = "unchecked"
-        obj = self.host.find_object(artifact["object_uuid"])
+        obj = holder_of_artifact(
+            self.index, self.host.find_object, self.ledger, activity, artifact
+        )
         if check_data or obj is None:
             value = None if obj is None else obj.metadata.get(artifact["key"])
             status = artifact_status(artifact, value)
@@ -429,7 +481,9 @@ class Inspector:
             self._input(position, item, trail, check_data)
             for position, item in enumerate(items[:MAX_INPUTS])
         ]
-        outputs = [self._output(output, check_data) for output in activity["outputs"]]
+        outputs = [
+            self._output(activity, output, check_data) for output in activity["outputs"]
+        ]
         env_id = activity.get("environment_id")
         environment = None
         if env_id is not None:

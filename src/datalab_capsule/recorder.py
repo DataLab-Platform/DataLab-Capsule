@@ -42,6 +42,8 @@ from datalab_capsule.hdf5 import load_ledger, save_ledger
 from datalab_capsule.inspection import (
     IDENTITY_LIMIT,
     Inspector,
+    holder_of_artifact,
+    holder_of_state,
     metadata_digest,
     output_state_status,
 )
@@ -703,11 +705,12 @@ class Recorder:
             ``replaced`` (another result now holds the key) or ``missing``.
         """
         statuses = []
-        for output in self.ledger.activity(activity_id)["outputs"]:
+        activity = self.ledger.activity(activity_id)
+        for output in activity["outputs"]:
             artifact = output.get("artifact")
             if artifact is None:
                 continue
-            obj = self.host.find_object(artifact["object_uuid"])
+            obj = self._artifact_holder(activity, artifact)
             value = None if obj is None else obj.metadata.get(artifact["key"])
             statuses.append(
                 {
@@ -811,15 +814,13 @@ class Recorder:
 
     def _inspector(self) -> Inspector:
         """Return an inspector of the current ledger (lookups are cached)."""
-        if not Inspector.index_is_current(self._index, self.ledger):
-            self._index = Inspector.build_index(self.ledger)
         return Inspector(
             self.ledger,
             self.host,
             self.computation,
             self.state_status,
             StateUnavailableError,
-            self._index,
+            self._lookups(),
         )
 
     def describe_object(
@@ -912,8 +913,27 @@ class Recorder:
             decode_parameters=lambda _contract, values: values,
             state_status=self.state_status,
             apply_context=apply_context,
+            find_state_object=self._state_holder,
         )
         return result, holder.get("prepared")
+
+    def _lookups(self) -> Any:
+        """Return the cached lookups of the ledger (identity breaks...)."""
+        if not Inspector.index_is_current(self._index, self.ledger):
+            self._index = Inspector.build_index(self.ledger)
+        return self._index
+
+    def _state_holder(self, state: dict[str, Any]) -> Any:
+        """Return the live object of a recorded state (see ``holder_of_state``)."""
+        return holder_of_state(self._lookups(), self.host.find_object, state)
+
+    def _artifact_holder(
+        self, activity: dict[str, Any], artifact: dict[str, Any]
+    ) -> Any:
+        """Return the live object holding an analysis result, or None."""
+        return holder_of_artifact(
+            self._lookups(), self.host.find_object, self.ledger, activity, artifact
+        )
 
     def _check_metadata_read(
         self, contract: Any, objs: list[Any], context: dict[str, Any]
@@ -972,7 +992,7 @@ class Recorder:
         for output in activity["outputs"]:
             if "state_id" in output:
                 state = self.ledger.states[output["state_id"]]
-                obj = self.host.find_object(state["object_uuid"])
+                obj = self._state_holder(state)
                 status = output_state_status(
                     state, obj, self.facts, self.state_status.get(state["state_id"])
                 )
@@ -987,7 +1007,7 @@ class Recorder:
                 )
                 continue
             artifact = output["artifact"]
-            obj = self.host.find_object(artifact["object_uuid"])
+            obj = self._artifact_holder(activity, artifact)
             value = None if obj is None else obj.metadata.get(artifact["key"])
             status = artifact_status(artifact, value)
             references.append(
