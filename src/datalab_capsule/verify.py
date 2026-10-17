@@ -26,12 +26,12 @@ from datalab_capsule.archive import DEFAULT_SIZE_POLICY, SizePolicy, read_capsul
 from datalab_capsule.compare import ReportError, validate_report
 from datalab_capsule.integrity import ProvenanceError, sha256_digest
 from datalab_capsule.manifest import (
+    FINGERPRINT_KEY,
     REFERENCED_KEY,
     REVISION_KEY,
     _entities,
     build_manifest,
     inspect_manifest,
-    manifest_fingerprint,
     workspace_entity,
 )
 from datalab_capsule.review import ReviewError, validate_review
@@ -40,18 +40,21 @@ __all__ = ["verify_capsule"]
 
 
 def _workspace_checks(manifest: Mapping[str, Any], workspace: bytes) -> dict[str, Any]:
-    """Check that the workspace ledger and stored states match the manifest."""
+    """Check that the workspace ledger and stored states match the manifest.
+
+    *manifest* was validated by :func:`read_capsule`: its stored fingerprint
+    is the fingerprint of its content.
+    """
     import h5py  # pylint: disable=import-outside-toplevel
 
-    from datalab_capsule.hdf5 import load_ledger, read_block
+    from datalab_capsule.hdf5 import load_block
 
     problems: list[str] = []
     with h5py.File(io.BytesIO(workspace), "r") as h5file:
-        block = read_block(h5file)
+        block = load_block(h5file)
         if block is None:
             return {"problems": ["The workspace has no provenance block"]}
-        ledger, locators = block
-        _ledger, status = load_ledger(h5file)
+        ledger, locators, status = block
     entities = _entities(manifest)
     root = entities["./"]
     entity = workspace_entity(manifest)
@@ -71,7 +74,8 @@ def _workspace_checks(manifest: Mapping[str, Any], workspace: bytes) -> dict[str
             for item in inspect_manifest(manifest)["attachments"]
         ],
     )
-    if manifest_fingerprint(rebuilt) != manifest_fingerprint(manifest):
+    # build_manifest stores the fingerprint of the rebuilt manifest
+    if _entities(rebuilt)["./"][FINGERPRINT_KEY] != root[FINGERPRINT_KEY]:
         problems.append("The manifest does not describe the workspace ledger")
     altered = sorted(s for s, value in status.items() if value == "altered")
     problems.extend(f"Stored state altered: {state_id}" for state_id in altered)
@@ -123,7 +127,8 @@ def verify_capsule(
         result["problems"].append(f"Invalid capsule: {exc}")
         return result
     manifest = capsule.manifest
-    result["fingerprint"] = manifest_fingerprint(manifest)
+    # Validated by read_capsule: the stored fingerprint matches the content
+    result["fingerprint"] = _entities(manifest)["./"][FINGERPRINT_KEY]
     if capsule.workspace is None:
         result["workspace"] = "not_available"
     elif importlib.util.find_spec("h5py") is None:

@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from decimal import Decimal
 from typing import Any
 
@@ -120,8 +121,14 @@ def _format_number(value: float) -> str:
     return sign + text
 
 
+#: Characters that a JSON string literal escapes (or refuses: lone surrogates)
+_ESCAPED = re.compile(r'["\\\x00-\x1f\ud800-\udfff]')
+
+
 def _format_string(value: str) -> str:
     """Return the JSON string literal of *value* (ECMAScript escaping rules)."""
+    if _ESCAPED.search(value) is None:
+        return f'"{value}"'
     out = ['"']
     for char in value:
         code = ord(char)
