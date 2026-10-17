@@ -124,3 +124,41 @@ def test_registry_round_trip(tmp_path: Path, server: str, capsys, monkeypatch) -
     missing = "sha256:" + "0" * 64
     assert main(["registry", "fetch", server, missing, str(tmp_path / "x")]) == 1
     assert "404" in capsys.readouterr().err
+
+
+def test_registry_client_steps(tmp_path: Path, server: str) -> None:
+    """The steps of a capsule interface: status, manifest, attachment, review."""
+    from datalab_capsule.exchange import check_registry_revision, review_of
+    from datalab_capsule.registry_client import RegistryClient, RegistryClientError
+
+    note = tmp_path / "protocol.txt"
+    note.write_bytes(b"Bench 2.\n")
+    capsule = read_capsule(_capsule(tmp_path, "steps", "--attach", str(note)))
+    manifest = json.dumps(capsule.manifest).encode("utf-8")
+    reader = RegistryClient(server)
+    assert reader.status()["token_required"] is True
+    with pytest.raises(RegistryClientError, match="401"):
+        reader.publish_manifest(manifest)
+    client = RegistryClient(server, "secret")
+    published = client.publish_manifest(manifest)
+    fingerprint = published["fingerprint"]
+    assert published["created"] is True
+    assert fingerprint == manifest_fingerprint(capsule.manifest)
+    client.upload_attachment(fingerprint, "protocol.txt", b"Bench 2.\n")
+    review = review_of(capsule.manifest, reviewer="B", statement="Checked.")
+    assert client.publish_review(json.dumps(review))["target"] == fingerprint
+    [listed] = reader.list_revisions()
+    assert listed["fingerprint"] == fingerprint and listed["reviews"] == 1
+    checked = check_registry_revision(
+        reader.get_manifest(fingerprint), fingerprint, reader.list_reviews(fingerprint)
+    )
+    assert [r["status"] for r in checked["reviews"]] == ["valid"]
+    [declared] = checked["summary"]["attachments"]
+    data = reader.get_checked_attachment(
+        fingerprint, declared["name"], declared["sha256"], declared["size"]
+    )
+    assert data == b"Bench 2.\n"
+    with pytest.raises(RegistryClientError, match="does not match"):
+        reader.get_checked_attachment(
+            fingerprint, declared["name"], "0" * 64, declared["size"]
+        )

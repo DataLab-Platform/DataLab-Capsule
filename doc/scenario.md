@@ -2,6 +2,8 @@
 
 This scenario exchanges a processing chain between two operators, first without any server, then through an optional registry. Operator A works with DataLab Desktop and the `workspace-capsule` command line; operator B works with DataLab-Web in a browser. Nothing is computed when a capsule is checked; replays are done by each edition, locally.
 
+DataLab Desktop also offers the capsule dialog of DataLab-Web (_File > Workspace capsule…_): operator A may use it instead of the command line to export the capsule (step 2), inspect the child with the supplied report and review and compare the revisions (step 4), open the child and replay its activities (step 5, _Local replay_ tab), and exchange through the registry (step 6). The steps below keep the command line, which is how the scenario was run and scripted.
+
 | Step | Operator | Tool | Result |
 | --- | --- | --- | --- |
 | 1 | A | DataLab Desktop | Processing chain saved as a workspace with its provenance |

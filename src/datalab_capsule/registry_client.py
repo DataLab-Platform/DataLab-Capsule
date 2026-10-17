@@ -108,6 +108,17 @@ class RegistryClient:
     def _revision(fingerprint: str) -> str:
         return "/revisions/" + urllib.parse.quote(fingerprint, safe="")
 
+    def _attachment(self, fingerprint: str, name: str) -> str:
+        return (
+            self._revision(fingerprint)
+            + "/attachments/"
+            + urllib.parse.quote(name, safe="")
+        )
+
+    def status(self) -> dict[str, Any]:
+        """``{"registry", "version", "token_required"}`` of the registry."""
+        return load_json(self._request("GET", "/status"))
+
     def list_revisions(self) -> list[dict[str, Any]]:
         """Flat list of revisions, most recently published first."""
         return load_json(self._request("GET", "/revisions", limit=MAX_LISTING_BYTES))
@@ -132,10 +143,54 @@ class RegistryClient:
         self, fingerprint: str, name: str, max_bytes: int = MAX_ATTACHMENT_BYTES
     ) -> bytes:
         """Attachment bytes (not checked), at most *max_bytes*."""
-        path = self._revision(fingerprint) + "/attachments/"
         return self._request(
-            "GET", path + urllib.parse.quote(name, safe=""), limit=max_bytes
+            "GET", self._attachment(fingerprint, name), limit=max_bytes
         )
+
+    def get_checked_attachment(
+        self, fingerprint: str, name: str, sha256: str, size: int | str
+    ) -> bytes:
+        """Attachment bytes checked against the SHA-256 and size of its manifest.
+
+        Args:
+            fingerprint: Revision fingerprint.
+            name: Attachment name.
+            sha256: Hexadecimal SHA-256 declared by the checked manifest (not by
+             the registry's listing).
+            size: Size declared by the checked manifest.
+
+        Raises:
+            RegistryClientError: If the registry refuses the request or returns
+             other bytes.
+        """
+        size = int(size)
+        data = self.get_attachment(fingerprint, name, min(size, MAX_ATTACHMENT_BYTES))
+        digest = sha256_digest(data).split(":", 1)[1]
+        if len(data) != size or digest != sha256.split(":")[-1]:
+            raise RegistryClientError(
+                f"The attachment from the registry does not match the manifest: {name}"
+            )
+        return data
+
+    def publish_manifest(self, manifest: bytes) -> dict[str, Any]:
+        """Publish a manifest (JSON bytes): ``{"fingerprint", "created"}``."""
+        return load_json(
+            self._request("POST", "/revisions", manifest, "application/json")
+        )
+
+    def upload_attachment(self, fingerprint: str, name: str, data: bytes) -> None:
+        """Upload an attachment declared by a published manifest."""
+        self._request(
+            "PUT",
+            self._attachment(fingerprint, name),
+            data,
+            "application/octet-stream",
+        )
+
+    def publish_review(self, review: bytes | str) -> dict[str, Any]:
+        """Publish a review (JSON): ``{"fingerprint", "target", "created"}``."""
+        data = review.encode("utf-8") if isinstance(review, str) else review
+        return load_json(self._request("POST", "/reviews", data, "application/json"))
 
     def publish_capsule(
         self, capsule: str | bytes, reviews: list[bytes] = ()
@@ -149,20 +204,12 @@ class RegistryClient:
         read = read_capsule(raw)
         with zipfile.ZipFile(io.BytesIO(raw)) as archive:
             manifest = archive.read(MANIFEST_NAME)
-        result = load_json(
-            self._request("POST", "/revisions", manifest, "application/json")
-        )
+        result = self.publish_manifest(manifest)
         fingerprint = result["fingerprint"]
         for name, data in read.attachments.items():
-            path = self._revision(fingerprint) + "/attachments/"
-            self._request(
-                "PUT",
-                path + urllib.parse.quote(name, safe=""),
-                data,
-                "application/octet-stream",
-            )
+            self.upload_attachment(fingerprint, name, data)
         for review in reviews:
-            self._request("POST", "/reviews", review, "application/json")
+            self.publish_review(review)
         return {
             "fingerprint": fingerprint,
             "created": result["created"],
