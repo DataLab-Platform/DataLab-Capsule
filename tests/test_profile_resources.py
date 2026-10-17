@@ -12,6 +12,8 @@ import pytest
 ROOT = Path(__file__).parents[1]
 SCRIPT = ROOT / "scripts" / "check_profile.py"
 PROFILE = ROOT.parent / "capsule" / "0.1"
+if not SCRIPT.is_file():  # e.g. the test files alone, in Pyodide
+    pytest.skip("scripts are not part of this test run", allow_module_level=True)
 
 
 def _load():
