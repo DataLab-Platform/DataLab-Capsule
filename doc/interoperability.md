@@ -47,6 +47,18 @@ Two-operator scenario, without server then with a registry:
 - A extracted the child workspace and replayed it on the Desktop. There were 4 real computations, all `exact`, including the activity added on the Web; the opaque activity is `not_verified`.
 - With the registry: A published with the CLI and token; B retrieved A's revision (manifest checked) and published the child and its review from the Web. A listed the registry and fetched the child (manifest checked, review valid). The fetched manifest is identical to the child capsule's.
 
+Two-operator scenario, again on 17 October 2026, with the candidate distributions (DataLab-Capsule `dbbb2aa`, DataLab `74cca869`, DataLab-Web `67e1188`):
+
+- A (Desktop, `provenance_demo.py` in an empty folder) built and saved the chain: 4 real computations, all `exact` (the addition of a constant now keeps its identity). The CLI of the candidate wheel, installed in a clean environment, created the capsule with `protocol.txt` (`sha256:aad19d…`) and published it to a local registry, refused without the token, accepted with it.
+- B (Web, worker, through the dialog, `two_operator_scenario.spec.ts`) inspected, opened and replayed the four activities, all `exact (ready)`, retrieved A's revision from the registry, added an activity, exported the child (`sha256:02774a…`, revision of A's), wrote a review citing a report and published the child and the review.
+- A verified the child with B's report and review (valid); B's review was refused against A's revision; `diff` showed the added activity and state as the only scientific changes; the child fetched from the registry was checked (review valid) and its manifest is identical to the child capsule's.
+- A replayed the child on the Desktop: 5 real computations, all `exact`, including the activity added on the Web.
+- The production bundle of DataLab-Web, extracted from its tarball and served by a static server with the candidate wheels, inspected, opened and replayed a capsule exported by the candidate DataLab Desktop, and verified a step from the Provenance tab (`release_build.spec.ts`, candidate level). The candidate DataLab Desktop, installed in a clean environment and built with PyInstaller, exported, inspected and reopened a capsule and kept its revision after a restart (`capsule_smoke_check.py`, frozen probe).
+
+The part of the scenario driven by hand in both interfaces (Desktop dialog, then DataLab-Web, then Desktop dialog again) remains to be replayed by an operator (`tracking/E5-MANUAL-REPLAY.md`); the evidence of the run above (files, SHA-256 of the distributions and of every file produced) is kept with the delivery, not in this repository.
+
+Costs and capacity of these paths are measured in the [performance notes](performance.md) (17 October 2026).
+
 ## Findings
 
 1. **Fixed: Web workspaces holding a macro could not be opened on the Desktop development branch.** DataLab reads the macro `uid` added in its development version. When the group was missing (all Web workspaces and those saved before that version), a swallowed error left the HDF5 reader in a wrong section and the opening failed. The scenario found it; the reader now closes the section in every case, with a regression test (DataLab).
@@ -63,4 +75,5 @@ Two-operator scenario, without server then with a registry:
 - Metadata read by a computation are outside state fingerprints. They are checked only when the operation contract declares them (`reads_metadata`, e.g. the fit parameters used by `evaluate_fit`): their digest is recorded in the activity context and a change refuses the replay (`input_changed`). Interactive Desktop fits are not recorded.
 - The registry has no accounts, quotas, rate limits or delete API; one token protects publishing. It must be deployed behind HTTPS and a reverse proxy (see the security analysis).
 - Fingerprints prove integrity, not authorship: reviews name their author without proving it.
+- Measured sizes (see [performance](performance.md)): DataLab-Web was tested up to a 233 MiB capsule (limit 256 MiB), DataLab Desktop up to 32 MiB through its dialog and the library up to 234 MiB; a ledger of 1000 activities stays usable in both editions. DataLab-Web needs network access to start (no offline mode).
 - Tested on Windows (Desktop) and Chromium (Web); the library CI also runs on Linux.
