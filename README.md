@@ -7,7 +7,7 @@ Status: experimental, under development. Nothing is published yet.
 ## Scope
 
 - Neutral provenance model shared by DataLab Desktop and DataLab-Web: operation calls, states, activities, environments (JSON Schemas under `src/datalab_capsule/schemas`).
-- Shared replay preparation (eligibility codes), the `exact` comparison rule and verification reports.
+- Shared replay preparation (eligibility codes), comparison rules and verification reports. A report states one of four verdicts: `exact` (same values), `within_tolerance` (values within the tolerance declared and justified for that operation), `different`, or `not_verified` (with the reason: opaque operation, missing input, unavailable reference...). A rule is never widened to hide a difference; see [rules](doc/rules.md).
 - HDF5 provenance block (`/DataLab_Provenance`) read and written with h5py alone; links and virtual datasets are refused.
 - Integrity primitives: RFC 8785 canonical JSON, SHA-256 digests, the `datalab-signal-v1` and `datalab-image-v1` state fingerprints (data, coordinates or calibration, units). A state also records the digest of its ROI definition, and an analysis result the digest of its stored value: a saved object whose data, calibration, units or ROI differ from its state is `altered`, and a result replaced by a later analysis is never attributed to the earlier one. Fingerprints are streamed into SHA-256 without copying the arrays.
 - Legacy workspaces: processing records stored by DataLab in object metadata (`__processing_parameters`, `__analysis_parameters`) of objects unknown to the ledger become `legacy_metadata` activities. They keep the record as stored and invent nothing: inputs are bound to the recorded objects (state unknown), the call is opaque without parameters, environment, edition and times are null, and import issues (missing ancestry, unavailable inputs, unsupported operations, version warnings...) are listed. They claim no result: the state of the holding object observed when the workspace was opened is named separately (`observed_state_id`), as an observed state that no activity produced. They are never replayed.
@@ -19,6 +19,16 @@ Status: experimental, under development. Nothing is published yet.
 - Verification without computation (`verify_capsule`): the archive and manifest, the workspace integrity, the match between the manifest and the workspace ledger, the fingerprints and ROI of every stored state (with h5py), and supplied verification reports and reviews. Recomputing an activity is the replay of an edition, never this package's job.
 - Pure Python for CPython 3.9+ and Pyodide (Python 3.12). The core only needs the standard library and `jsonschema`; HDF5 helpers use NumPy and h5py.
 - The package never imports DataLab, Sigima, SigimaX or Qt, and never executes code named in a file.
+
+## Installation
+
+Users of DataLab Desktop and DataLab-Web need nothing more than their edition: both handle capsules from _File > Workspace capsule…_ (export, inspection, local replay, revisions, registry) and use the same functions of this package (`datalab_capsule.exchange`). The [two-operator scenario](doc/scenario.md) follows that path.
+
+The package itself is installed in one of three ways, which must not be mixed up:
+
+- **Released version**, for users of the command line and third-party readers: `pip install DataLab-Capsule`, with the `hdf5` extra to create capsules or check stored states and the `registry` extra to run a registry. Not available yet (see the status above).
+- **Candidate qualification**, before a release: a wheel and an sdist built from the commit to qualify (`python -m build`), checked with `scripts/check_dist.py` and `scripts/check_profile.py`, then installed in a clean environment, outside the checkout.
+- **Development**: editable install of this checkout, used by the sibling checkouts of DataLab and DataLab-Web (see [developer notes](doc/development.md)).
 
 ## Command line
 

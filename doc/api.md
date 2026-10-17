@@ -37,7 +37,7 @@ changes = diff_manifests(old.manifest, new.manifest)
 
 ## Capsule interfaces (used by the editions)
 
-`exchange` holds what the capsule dialogs of DataLab Desktop and DataLab-Web need beyond reading and verifying, so that both give the same answers. Nothing is computed.
+`exchange` holds what the capsule dialogs of DataLab Desktop and DataLab-Web (_File > Workspace capsule…_ in both editions) need beyond reading and verifying, so that both give the same answers. Each edition passes its own `SizePolicy`. The `workspace-capsule` command line is an independent client of the same library. Nothing is computed.
 
 | Function | Purpose |
 | --- | --- |
