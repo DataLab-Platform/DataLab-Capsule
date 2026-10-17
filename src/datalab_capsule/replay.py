@@ -133,6 +133,7 @@ def prepare_activity(
     decode_parameters: Callable[[Any, dict[str, Any]], Any],
     state_status: Mapping[str, str] | None = None,
     apply_context: Callable[[Any, list[Any], dict[str, Any]], list[Any]] | None = None,
+    find_state_object: Callable[[Mapping[str, Any]], Any] | None = None,
 ) -> Plan | Refusal:
     """Prepare a recorded activity for replay.
 
@@ -152,6 +153,10 @@ def prepare_activity(
          raises :class:`IneligibleError` (``unsupported_context``, or
          ``input_changed`` with the positions of the changed inputs) when the
          recorded context cannot be applied. Defaults to the live objects.
+        find_state_object: ``recorded state -> live object or None``, used
+         instead of *find_object* to find the object of an input state (e.g.
+         applying identity breaks, see
+         :func:`datalab_capsule.inspection.holder_of_state`).
 
     Returns:
         A :class:`Plan`, or a :class:`Refusal` with its eligibility code.
@@ -181,7 +186,11 @@ def prepare_activity(
     objects: list[tuple[str, str, Any]] = []
     for item in call["inputs"]:
         state = ledger.states[item["binding"]["state_id"]]
-        obj = find_object(state["object_uuid"])
+        obj = (
+            find_state_object(state)
+            if find_state_object is not None
+            else find_object(state["object_uuid"])
+        )
         if obj is None:
             checked.append(
                 {

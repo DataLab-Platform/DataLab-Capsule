@@ -607,3 +607,60 @@ def test_appended_object_never_inherits_another_provenance(recorder, workspace, 
     assert used["object_present"] is True
     recorder.ledger.validate()
     assert recorder.capture_failures == 0
+
+
+def _candidate(prepared):
+    """Run a prepared execution of the fake library."""
+    contract, inputs, values, _context = prepared
+    value = values.get("value")
+    return (
+        contract.function(*inputs)
+        if value is None
+        else contract.function(*inputs, value)
+    )
+
+
+def _copy_of(obj):
+    """Return a copy of *obj* holding the same identifier, data and metadata."""
+    copy = signal(obj.y.copy(), x=obj.x.copy())
+    copy.uuid, copy.metadata = obj.uuid, dict(obj.metadata)
+    return copy
+
+
+def test_verification_never_uses_an_appended_copy(recorder, workspace) -> None:
+    """Verifying applies the identity break: inputs, results and analyses."""
+    from datalab_capsule.ledger import Ledger  # pylint: disable=C0415
+
+    s0 = workspace.add(signal([1.0, 2.0, 3.0, 4.0]))
+    s1 = run(recorder, workspace, gauss, 2.0, s0)
+    s2 = run(recorder, workspace, normalize, "maximum", s1)
+    pending = recorder.begin(detect, 2.0, s1)
+    s1.metadata["_peaks_"] = detect(s1, 2.0).to_dict()
+    analysis = recorder.complete_analysis(pending, s1, "table", "_peaks_")
+    production = recorder.describe_object(s2.uuid)["production"]["activity_id"]
+    s1_production = recorder.describe_object(s1.uuid)["production"]["activity_id"]
+    assert recorder.verify(production, _candidate)["verdict"] == "exact"
+    # S1 deleted, then a workspace holding the same S1 appended.
+    del workspace.objects[s1.uuid]
+    copy = _copy_of(s1)
+    workspace.objects[s1.uuid] = copy
+    recorder.load((Ledger(), {}), replaced=False, appended=[copy])
+    # The input of S2 is missing: the copy is not used.
+    report = recorder.verify(production, _candidate)
+    assert report["verdict"] == "not_verified"
+    assert report["eligibility"] == "missing_input"
+    assert report["inputs"][0]["status"] == "missing"
+    # The result of the production of S1 is missing: not compared with the copy.
+    report = recorder.verify(s1_production, _candidate)
+    assert report["reference"]["status"] == "missing"
+    assert report["verdict"] != "exact"
+    # The analysis result stored in S1 is missing too.
+    assert recorder.artifact_statuses(analysis["activity_id"])[0]["status"] == (
+        "missing"
+    )
+    report = recorder.verify(analysis["activity_id"], _candidate)
+    assert report["verdict"] == "not_verified"
+    # Consultation and verification follow the same rule.
+    (source,) = recorder.describe_object(s2.uuid)["production"]["inputs"]
+    assert source["object_present"] is False
+    recorder.ledger.validate()
