@@ -40,6 +40,7 @@ __all__ = [
     "ProvenanceFormatError",
     "build_locators",
     "has_block",
+    "load_block",
     "load_ledger",
     "locate_current_states",
     "locate_fingerprints",
@@ -479,14 +480,16 @@ def save_ledger(h5file: Any, ledger: Ledger) -> None:
     write_block(h5file, ledger, locate_current_states(h5file, ledger))
 
 
-def load_ledger(h5file: Any) -> tuple[Ledger, dict[str, str]] | None:
-    """Read the provenance block and derive the status of each state.
+def load_block(
+    h5file: Any,
+) -> tuple[Ledger, dict[str, dict[str, str]], dict[str, str]] | None:
+    """Read the provenance block once: ledger, locators and state statuses.
 
-    A located state whose data or ROI no longer match is ``altered``; a state
-    without locator is ``unavailable``.
+    See :func:`load_ledger` for the statuses.
 
     Returns:
-        ``(ledger, state_status)``, or None when the file has no block.
+        ``(ledger, locators, state_status)``, or None when the file has no
+        block.
 
     Raises:
         ProvenanceFormatError: If the block or a located object is invalid.
@@ -502,4 +505,23 @@ def load_ledger(h5file: Any) -> tuple[Ledger, dict[str, str]] | None:
             status[state_id] = "unavailable"
         elif state_id in altered:
             status[state_id] = "altered"
+    return ledger, locators, status
+
+
+def load_ledger(h5file: Any) -> tuple[Ledger, dict[str, str]] | None:
+    """Read the provenance block and derive the status of each state.
+
+    A located state whose data or ROI no longer match is ``altered``; a state
+    without locator is ``unavailable``.
+
+    Returns:
+        ``(ledger, state_status)``, or None when the file has no block.
+
+    Raises:
+        ProvenanceFormatError: If the block or a located object is invalid.
+    """
+    block = load_block(h5file)
+    if block is None:
+        return None
+    ledger, _locators, status = block
     return ledger, status

@@ -67,6 +67,40 @@ def test_canonical_json_scalars() -> None:
     assert canonical_json("\x1f\u2028é") == '"\\u001f\u2028é"'
 
 
+def _reference_string(value: str) -> str:
+    """JSON string literal built character by character (ECMAScript rules)."""
+    escapes = {'"': '\\"', "\\": "\\\\", "\b": "\\b", "\f": "\\f"}
+    escapes.update({"\n": "\\n", "\r": "\\r", "\t": "\\t"})
+    out = []
+    for char in value:
+        if char in escapes:
+            out.append(escapes[char])
+        elif ord(char) < 0x20:
+            out.append(f"\\u{ord(char):04x}")
+        else:
+            out.append(char)
+    return '"' + "".join(out) + '"'
+
+
+def test_canonical_strings_match_the_escaping_rules() -> None:
+    """Strings with or without characters to escape give the same literals."""
+    samples = [
+        "",
+        "plain text",
+        "sigima.signal.normalize",
+        "é ü 漢字 \u2028 \U0001f600",
+    ]
+    samples += [chr(code) for code in range(0x30)] + ["\x7f", "/", 'a"b\\c\nd\x00e']
+    for sample in samples:
+        assert canonical_json(sample) == _reference_string(sample), repr(sample)
+        assert canonical_json({sample: sample}) == (
+            "{" + _reference_string(sample) + ":" + _reference_string(sample) + "}"
+        )
+    for lone in ("\ud800", "a\udfffb"):
+        with pytest.raises(CanonicalJSONError):
+            canonical_json(lone)
+
+
 def test_fingerprint_matches_independent_payload() -> None:
     """The fingerprint equals a hand-built descriptor and little-endian payload."""
     x = [0.0, 0.25, 0.5, 0.75]
