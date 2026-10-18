@@ -184,7 +184,9 @@ def inspect_capsule(
                 )
     resolver = _resolver(workspace)
     try:
-        capsule = read_capsule(data, policy, resolver)
+        # Without the referenced workspace: a workspace that does not match is an
+        # integrity problem (see verify_capsule), the capsule stays readable
+        capsule = read_capsule(data, policy)
     except (OSError, ProvenanceError) as exc:
         return {
             "summary": None,

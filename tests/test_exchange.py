@@ -134,6 +134,11 @@ def test_inspect_invalid_and_referenced() -> None:
     assert inspect_capsule(capsule)["integrity"]["workspace"] == "not_available"
     supplied = inspect_capsule(capsule, workspace=data)["integrity"]
     assert supplied["workspace"] == "verified" and supplied["valid"]
+    # Another workspace file: the capsule stays readable, its workspace invalid
+    wrong = inspect_capsule(capsule, workspace=b"another file")
+    assert wrong["summary"] is not None and wrong["manifest"] is not None
+    assert wrong["summary"]["workspace"]["referenced"] is True
+    assert not wrong["integrity"]["valid"] and wrong["integrity"]["problems"]
 
 
 def test_registry_revision_is_checked() -> None:
