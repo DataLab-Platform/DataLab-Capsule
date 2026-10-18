@@ -465,6 +465,33 @@ def test_invalid_capsule_origin_is_refused(origin) -> None:
             read_capsule_origin(h5file)
 
 
+def test_malformed_objects_are_refused() -> None:
+    """Malformed object nodes give a format error, never another exception."""
+    sig, ima = "/DataLab_Sig/g", "/DataLab_Ima/g"
+    with _memory_file() as h5file:
+        h5file[f"{sig}/dataset"] = np.zeros(3)
+        h5file["/DataLab_Sig/flat"] = np.zeros(3)
+        h5file[f"{sig}/text/xydata"] = np.array([[b"a", b"b"], [b"c", b"d"]])
+        h5file.create_group(f"{ima}/origin").attrs["x0"] = "not a number"
+        h5file[f"{ima}/origin/data"] = np.zeros((2, 2))
+        h5file.create_group(f"{sig}/roi")["metadata"] = np.zeros(1)
+        h5file.create_group(f"{sig}/units").attrs["xunit"] = np.bytes_(b"\xff")
+        h5file[f"{sig}/units/xydata"] = np.zeros((2, 3))
+        for reader, path in (
+            (read_signal, f"{sig}/dataset"),
+            (read_signal, "/DataLab_Sig/flat/inner"),
+            (read_signal, f"{sig}/text"),
+            (read_image, f"{ima}/origin"),
+            (read_roi, f"{sig}/roi"),
+            (read_signal, f"{sig}/units"),
+        ):
+            with pytest.raises(ProvenanceFormatError):
+                reader(h5file, path)
+        located = {"s": {"kind": "signal", "path": f"{sig}/text"}}
+        with pytest.raises(ProvenanceFormatError):
+            locate_fingerprints(h5file, located)
+
+
 def test_links_are_refused(tmp_path: Path) -> None:
     """External and soft links under the panel roots are refused."""
     other = tmp_path / "other.h5"

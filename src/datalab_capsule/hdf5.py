@@ -328,19 +328,35 @@ def build_locators(
 
 
 def _object_node(h5file: Any, path: str) -> Any:
+    h5py = _h5py()
     _check_path(path)
     node: Any = h5file
     for part in path.strip("/").split("/"):
+        if not isinstance(node, h5py.Group):
+            raise ProvenanceFormatError(f"Not an object group: {path}")
         if part not in node:
             raise ProvenanceFormatError(f"Missing object: {path}")
         _check_link(node, part)
         node = node[part]
+    if not isinstance(node, h5py.Group):
+        raise ProvenanceFormatError(f"Not an object group: {path}")
     return node
 
 
 def _text_attr(node: Any, name: str) -> str:
     value = node.attrs.get(name, "")
-    return value.decode("utf-8") if isinstance(value, bytes) else str(value)
+    if not isinstance(value, bytes):
+        return str(value)
+    try:
+        return value.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ProvenanceFormatError(f"Invalid UTF-8 in {node.name}@{name}") from exc
+
+
+def _check_numeric(dataset: Any, path: str) -> None:
+    """Refuse object, string or compound data where numbers are expected."""
+    if dataset.dtype.kind not in "biufc":
+        raise ProvenanceFormatError(f"Not numeric data: {path}/{dataset.name}")
 
 
 def read_signal(h5file: Any, path: str) -> dict[str, Any]:
@@ -363,6 +379,7 @@ def read_signal(h5file: Any, path: str) -> dict[str, Any]:
     if not isinstance(dataset, h5py.Dataset) or dataset.ndim != 2:
         raise ProvenanceFormatError(f"Invalid xydata: {path}")
     _check_dataset(dataset, MAX_SIGNAL_BYTES)
+    _check_numeric(dataset, path)
     if dataset.shape[0] not in (2, 3, 4):
         raise ProvenanceFormatError(f"Invalid xydata rows: {path}")
     data = dataset[()]
@@ -402,6 +419,7 @@ def read_image(h5file: Any, path: str) -> dict[str, Any]:
         if not isinstance(dataset, h5py.Dataset):
             raise ProvenanceFormatError(f"Invalid {name}: {path}")
         _check_dataset(dataset, MAX_IMAGE_BYTES)
+        _check_numeric(dataset, path)
         arrays[name] = dataset[()]
     if arrays["data"].ndim != 2:
         raise ProvenanceFormatError(f"Invalid image data: {path}")
@@ -413,7 +431,10 @@ def read_image(h5file: Any, path: str) -> dict[str, Any]:
     }
     if bool(node.attrs.get("is_uniform_coords", True)):
         for name, default in (("x0", 0.0), ("y0", 0.0), ("dx", 1.0), ("dy", 1.0)):
-            result[name] = float(node.attrs.get(name, default))
+            try:
+                result[name] = float(node.attrs.get(name, default))
+            except (TypeError, ValueError) as exc:
+                raise ProvenanceFormatError(f"Invalid {name}: {path}") from exc
     else:
         result["xcoords"] = arrays["xcoords"]
         result["ycoords"] = arrays["ycoords"]
@@ -469,6 +490,8 @@ def read_roi(h5file: Any, path: str) -> Any:
         return None
     _check_link(node, "metadata")
     metadata = node["metadata"]
+    if not isinstance(metadata, _h5py().Group):
+        raise ProvenanceFormatError(f"Invalid metadata: {path}")
     if ROI_METADATA_KEY not in metadata:
         return None
     _check_link(metadata, ROI_METADATA_KEY)
@@ -492,7 +515,7 @@ def locate_fingerprints(
             image = read_image(h5file, locator["path"])
             try:
                 result[state_id] = image_fingerprint(image.pop("data"), **image)
-            except ValueError as exc:
+            except (TypeError, ValueError) as exc:
                 raise ProvenanceFormatError(
                     f"Invalid image {locator['path']}: {exc}"
                 ) from exc
@@ -507,7 +530,7 @@ def locate_fingerprints(
                 signal["xunit"],
                 signal["yunit"],
             )
-        except ValueError as exc:
+        except (TypeError, ValueError) as exc:
             raise ProvenanceFormatError(
                 f"Invalid signal {locator['path']}: {exc}"
             ) from exc
