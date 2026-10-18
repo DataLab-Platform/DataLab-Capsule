@@ -436,6 +436,46 @@ def test_compare_analysis_results() -> None:
     assert compare_artifacts("geometry", point, geometry)["verdict"] == "different"
 
 
+PULSES = {
+    "schema": 1,
+    "title": "Pulse features",
+    "kind": "pulse_features",
+    "names": ["signal_shape", "amplitude", "rise_time"],
+    "data": [["step", 1.0, None], ["square", 2.0, float("nan")]],
+    "roi_indices": [0, 1],
+    "func_name": "extract_pulse_features",
+    "attrs": {},
+}
+
+
+def test_compare_tables_mixing_texts_and_numbers() -> None:
+    """Numeric columns of a mixed table are compared under the rule."""
+    same = {**PULSES, "data": [["step", 1.0, None], ["square", 2.0, float("nan")]]}
+    assert compare_artifacts("table", same, PULSES)["verdict"] == "exact"
+    close = {
+        **PULSES,
+        "data": [["step", 1.0 + 1e-13, None], ["square", 2.0, float("nan")]],
+    }
+    assert compare_artifacts("table", close, PULSES)["verdict"] == "different"
+    tolerant = compare_artifacts(
+        "table", close, PULSES, TOLERANCE, environment="different"
+    )
+    assert tolerant["verdict"] == "within_tolerance"
+    assert tolerant["observed"]["structure_match"] is True
+    for data in (
+        [["square", 1.0, None], ["square", 2.0, float("nan")]],  # another text
+        [["step", 1.0, float("nan")], ["square", 2.0, float("nan")]],  # not empty
+        [["step", 1.0, None], ["square", 2.0, 0.5]],  # another number
+    ):
+        changed = {**PULSES, "data": data}
+        assert (
+            compare_artifacts(
+                "table", changed, PULSES, TOLERANCE, environment="different"
+            )["verdict"]
+            == "different"
+        )
+
+
 def test_report_compares_every_output() -> None:
     """The verdict of a report is the most severe verdict of its outputs."""
     env = compare_environments(None, None, None, None)

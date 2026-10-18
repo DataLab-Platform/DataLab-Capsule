@@ -11,6 +11,7 @@ missing reference gives the verdict ``not_verified``.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from typing import Any
 
@@ -249,7 +250,11 @@ def artifact_content(
     Returns:
         ``(structure, rows)``: the structure (kinds, column names, ROI indices)
         must be equal; the rows (``data`` or ``coords``, as float64 arrays) are
-        compared under the rule. Non-numeric table data belong to the structure.
+        compared under the rule. A table mixing texts and numbers (e.g. a kind
+        of pulse and its measures) is split by column: numeric columns, whose
+        empty cells (None) are NaN, are rows ``data[<column>]`` compared under
+        the rule, the position of their empty cells being structure; the other
+        columns belong to the structure, compared exactly (NaN equal to NaN).
     """
     import numpy as np  # pylint: disable=import-outside-toplevel
 
@@ -268,9 +273,50 @@ def artifact_content(
     try:
         rows = {name: np.asarray([] if raw is None else raw, dtype=np.float64)}
     except (TypeError, ValueError):
-        structure[name] = np.asarray(raw, dtype=object).tolist()
         rows = {}
+        columns = _table_columns(raw) if kind != "geometry" else None
+        if columns is None:
+            structure[name] = _canonical(raw)
+        for index, column in enumerate(columns or ()):
+            key = f"{name}[{index}]"
+            if all(cell is None or _is_number(cell) for cell in column):
+                rows[key] = np.asarray(
+                    [np.nan if cell is None else cell for cell in column],
+                    dtype=np.float64,
+                )
+                structure[f"{key}:empty"] = [
+                    row for row, cell in enumerate(column) if cell is None
+                ]
+            else:
+                structure[key] = _canonical(column)
     return structure, rows
+
+
+def _table_columns(raw: Any) -> list[list[Any]] | None:
+    """Return the columns of table data (rows of equal length), or None."""
+    if not isinstance(raw, (list, tuple)) or not all(
+        isinstance(row, (list, tuple)) for row in raw
+    ):
+        return None
+    widths = {len(row) for row in raw}
+    if len(widths) > 1:
+        return None
+    width = widths.pop() if widths else 0
+    return [[row[index] for row in raw] for index in range(width)]
+
+
+def _is_number(value: Any) -> bool:
+    """Return True for a real number (booleans are not numbers here)."""
+    import numpy as np  # pylint: disable=import-outside-toplevel
+
+    return isinstance(value, (int, float, np.integer, np.floating)) and not (
+        isinstance(value, (bool, np.bool_))
+    )
+
+
+def _canonical(value: Any) -> str:
+    """Return a canonical text of non-numeric data (NaN equal to NaN)."""
+    return json.dumps(value, sort_keys=True, default=repr)
 
 
 def compare_artifacts(
