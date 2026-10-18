@@ -90,6 +90,10 @@ def output_state_status(
 ) -> str:
     """Return the status of a recorded output state against its object.
 
+    The comparison is :func:`~datalab_capsule.replay.compare_state`, as for
+    inputs: same data fingerprint and same ROI. A result whose ROI changed is
+    no longer the recorded result.
+
     Args:
         state: Recorded output state.
         obj: Live object holding the output, or None.
@@ -99,13 +103,13 @@ def output_state_status(
 
     Returns:
         ``missing`` (object absent, or the state was not saved in the file),
-        ``altered`` (content differs from the recorded state) or ``available``.
+        ``altered`` (data or ROI differ from the recorded state, or cannot be
+        compared with it) or ``available``.
     """
     if obj is None or file_status == "unavailable":
         return "missing"
-    if file_status == "altered" or facts(obj)["fingerprint"] != state["fingerprint"]:
-        return "altered"
-    return "available"
+    status, _reason = compare_state(state, facts(obj), file_status)
+    return "available" if status == "available" else "altered"
 
 
 class _Index:

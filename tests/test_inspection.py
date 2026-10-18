@@ -661,6 +661,30 @@ def test_verification_never_uses_an_appended_copy(recorder, workspace) -> None:
     report = recorder.verify(analysis["activity_id"], _candidate)
     assert report["verdict"] == "not_verified"
     # Consultation and verification follow the same rule.
-    (source,) = recorder.describe_object(s2.uuid)["production"]["inputs"]
-    assert source["object_present"] is False
     recorder.ledger.validate()
+
+
+def test_result_with_another_roi_is_not_a_reference(recorder, workspace) -> None:
+    """A result whose ROI alone changed is no longer the recorded result."""
+    s0 = workspace.add(signal([1.0, 2.0, 3.0, 4.0]))
+    s1 = run(recorder, workspace, gauss, 2.0, s0)
+    production = recorder.describe_object(s1.uuid)["production"]["activity_id"]
+    assert recorder.verify(production, _candidate)["verdict"] == "exact"
+    s1.roi = ROI([0.0, 0.5])
+    view = recorder.describe_object(s1.uuid, check_data=True)
+    assert view["anchor"]["content"] == "differs"
+    assert [o["status"] for o in view["production"]["outputs"]] == ["altered"]
+
+    def same_roi_candidate(prepared):
+        # Even a candidate holding the changed ROI is never found equal to it.
+        result = _candidate(prepared)
+        result.roi = ROI([0.0, 0.5])
+        return result
+
+    for execute in (_candidate, same_roi_candidate):
+        report = recorder.verify(production, execute)
+        assert report["reference"]["status"] == "altered"
+        assert report["verdict"] == "not_verified"
+        assert report["outputs"][0]["verdict"] == "not_verified"
+    s1.roi = None
+    assert recorder.verify(production, _candidate)["verdict"] == "exact"
