@@ -410,6 +410,10 @@ class Recorder:
         """Break the identity of appended objects whose UUID the ledger knows."""
         try:
             known = set(self.ledger.object_uuids())
+            # Objects bound by records of old workspaces have no state
+            for activity in self.ledger.activities:
+                for item in activity["call"]["inputs"]:
+                    known.update(item["binding"].get("object_uuids") or ())
             for obj in objects:
                 uid = self.host.object_uuid(obj)
                 if (

@@ -351,7 +351,10 @@ class Inspector:
                 "role": item["role"],
                 "state_id": None,
                 "object_uuid": uid,
+                # Bound before any identity break: after one, the object holding
+                # this identifier is another object
                 "object_present": uid is not None
+                and uid not in self.index.breaks
                 and self.host.find_object(uid) is not None,
                 "produced_by": None,
                 "has_ancestors": False,
@@ -410,6 +413,7 @@ class Inspector:
             "recorded": "artifact",
             "kind": artifact["kind"],
             "object_uuid": artifact["object_uuid"],
+            "object_present": obj is not None,
             "key": artifact["key"],
             "status": status,
         }

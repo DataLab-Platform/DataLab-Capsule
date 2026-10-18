@@ -437,6 +437,16 @@ def test_opaque_and_legacy_records(recorder, workspace) -> None:
     ]
     assert legacy["legacy"]["observed_state_id"] == view["state"]["state_id"]
     assert "legacy_context_unknown" in legacy["limits"]
+    # The source deleted, then a workspace holding the same source appended: the
+    # old record does not name the appended object as its source.
+    from datalab_capsule.ledger import Ledger  # pylint: disable=C0415
+
+    del workspace.objects[s0.uuid]
+    copy = _copy_of(s0)
+    workspace.objects[s0.uuid] = copy
+    recorder.load((Ledger(), {}), replaced=False, appended=[copy])
+    (legacy,) = recorder.describe_object(old.uuid)["legacy"]
+    assert legacy["inputs"][0]["object_present"] is False
 
 
 def test_analyses_are_listed_separately(recorder, workspace) -> None:
@@ -459,6 +469,7 @@ def test_analyses_are_listed_separately(recorder, workspace) -> None:
             "recorded": "artifact",
             "kind": "table",
             "object_uuid": s0.uuid,
+            "object_present": True,
             "key": "_peaks_",
             "status": "unchecked",
         }
@@ -658,6 +669,8 @@ def test_verification_never_uses_an_appended_copy(recorder, workspace) -> None:
     assert recorder.artifact_statuses(analysis["activity_id"])[0]["status"] == (
         "missing"
     )
+    (output,) = recorder.describe_activity(analysis["activity_id"])["outputs"]
+    assert output["object_present"] is False
     report = recorder.verify(analysis["activity_id"], _candidate)
     assert report["verdict"] == "not_verified"
     # Consultation and verification follow the same rule.
