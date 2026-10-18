@@ -12,7 +12,7 @@ import zipfile
 import h5py
 import pytest
 
-from datalab_capsule.archive import read_capsule
+from datalab_capsule.archive import CapsuleError, read_capsule
 from datalab_capsule.cli import main
 from datalab_capsule.hdf5 import ProvenanceFormatError, read_roi
 from datalab_capsule.integrity import MAX_JSON_DEPTH, check_json_depth, load_json
@@ -22,6 +22,7 @@ from datalab_capsule.manifest import (
     manifest_fingerprint,
     validate_manifest,
 )
+from datalab_capsule.verify import verify_capsule
 
 from .test_diff_verify import _chain, _manifest
 
@@ -121,3 +122,15 @@ def test_nested_hdf5_metadata_is_refused() -> None:
         node.attrs["__dict"] = 1
         with pytest.raises(ProvenanceFormatError, match="nested too deeply"):
             read_roi(h5file, "/DataLab_Sig/g/s")
+
+
+def test_damaged_entry_is_an_invalid_capsule() -> None:
+    """A CRC mismatch while reading an entry is refused as an invalid capsule."""
+    data = bytearray(_manifest_zip('{"a": 1}' * 8))
+    position = data.find(b'{"a"')
+    data[position + 1] ^= 0xFF
+    with pytest.raises(CapsuleError, match="Damaged entry"):
+        read_capsule(bytes(data))
+    result = verify_capsule(bytes(data))
+    assert not result["valid"]
+    assert "Damaged entry" in result["problems"][0]

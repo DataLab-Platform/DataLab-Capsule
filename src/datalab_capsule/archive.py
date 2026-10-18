@@ -294,9 +294,13 @@ def _check_entry(info: zipfile.ZipInfo, seen: set[str], policy: SizePolicy) -> N
 
 
 def _read_entry(archive: zipfile.ZipFile, info: zipfile.ZipInfo, limit: int) -> bytes:
-    with archive.open(info) as stream:
-        # The header size was checked against *limit*: never read past it.
-        data = stream.read(info.file_size + 1)
+    try:
+        with archive.open(info) as stream:
+            # The header size was checked against *limit*: never read past it.
+            data = stream.read(info.file_size + 1)
+    except (zipfile.BadZipFile, EOFError) as exc:
+        # Raised while reading, e.g. on a CRC mismatch or a truncated entry
+        raise CapsuleError(f"Damaged entry {info.filename}: {exc}") from exc
     if len(data) > limit or len(data) != info.file_size:
         raise CapsuleError(f"Entry size does not match its header: {info.filename}")
     return data
