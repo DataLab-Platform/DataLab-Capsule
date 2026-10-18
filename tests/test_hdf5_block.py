@@ -510,3 +510,52 @@ def test_links_are_refused(tmp_path: Path) -> None:
         h5file["DataLab_Sig/g001: Group/s001: X"] = h5py.SoftLink("/elsewhere")
         with pytest.raises(ProvenanceFormatError):
             scan_object_index(h5file)
+
+
+def test_missing_nonuniform_coordinates_are_refused() -> None:
+    """Non-uniform coordinates are never replaced by default uniform ones."""
+    path = "/DataLab_Ima/g/i"
+    with _memory_file() as h5file:
+        coords = (np.array([0.0, 1.0, 3.0]), np.array([0.0, 2.0]))
+        _write_image(h5file, path, np.zeros((2, 3)), OBJ_UUID, coords=coords)
+        assert read_image(h5file, path)["xcoords"] is not None
+        del h5file[f"{path}/ycoords"]
+        with pytest.raises(ProvenanceFormatError, match="non-uniform"):
+            read_image(h5file, path)
+
+
+def test_object_metadata_links_are_refused() -> None:
+    """The metadata of an object are neither a link nor a dataset."""
+    with _memory_file() as h5file:
+        h5file.create_group("/elsewhere").attrs["__uuid"] = OBJ_UUID
+        group = h5file.create_group("/DataLab_Sig/g/s")
+        group["metadata"] = h5py.SoftLink("/elsewhere")
+        with pytest.raises(ProvenanceFormatError):
+            scan_object_index(h5file)
+    with _memory_file() as h5file:
+        h5file.create_group("/DataLab_Sig/g/s")["metadata"] = np.zeros(1)
+        with pytest.raises(ProvenanceFormatError):
+            scan_object_index(h5file)
+
+
+def test_locator_pointing_to_another_object_is_refused() -> None:
+    """A locator must point to the object of its state, not to a look-alike."""
+    other = "00000000-0000-4000-8000-000000000099"
+    sig = signal([1.0, 2.0, 3.0, 4.0])
+    ledger = Ledger()
+    state_id = ledger.observe(OBJ_UUID, signal_state_facts(sig))
+    with _memory_file() as h5file:
+        _write_signal(h5file, "/DataLab_Sig/g/a", sig, OBJ_UUID)
+        _write_signal(h5file, "/DataLab_Sig/g/b", sig, other)
+        write_block(
+            h5file, ledger, {state_id: {"kind": "signal", "path": "/DataLab_Sig/g/a"}}
+        )
+        assert load_ledger(h5file)[1] == {}
+    with _memory_file() as h5file:
+        _write_signal(h5file, "/DataLab_Sig/g/a", sig, OBJ_UUID)
+        _write_signal(h5file, "/DataLab_Sig/g/b", sig, other)
+        write_block(
+            h5file, ledger, {state_id: {"kind": "signal", "path": "/DataLab_Sig/g/b"}}
+        )
+        with pytest.raises(ProvenanceFormatError, match="another object"):
+            load_ledger(h5file)

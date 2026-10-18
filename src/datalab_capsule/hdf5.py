@@ -295,15 +295,37 @@ def scan_object_index(h5file: Any) -> dict[str, dict[str, str]]:
                 obj = group[obj_name]
                 if not isinstance(obj, h5py.Group) or "metadata" not in obj:
                     continue
-                object_uuid = obj["metadata"].attrs.get("__uuid")
-                if isinstance(object_uuid, bytes):
-                    object_uuid = object_uuid.decode("utf-8")
-                if not isinstance(object_uuid, str) or not object_uuid:
+                object_uuid = _object_uuid(obj)
+                if object_uuid is None:
                     continue
                 if object_uuid in index:
                     raise ProvenanceFormatError(f"Duplicate object UUID {object_uuid}")
                 index[object_uuid] = {"kind": kind, "path": obj.name}
     return index
+
+
+def _object_uuid(obj: Any) -> str | None:
+    """Return the ``__uuid`` attribute of an object group's metadata, or None.
+
+    Raises:
+        ProvenanceFormatError: If the metadata are a link, not a group, or the
+         UUID is not valid UTF-8.
+    """
+    if "metadata" not in obj:
+        return None
+    _check_link(obj, "metadata")
+    metadata = obj["metadata"]
+    if not isinstance(metadata, _h5py().Group):
+        raise ProvenanceFormatError(f"Invalid metadata: {obj.name}")
+    object_uuid = metadata.attrs.get("__uuid")
+    if isinstance(object_uuid, bytes):
+        try:
+            object_uuid = object_uuid.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ProvenanceFormatError(f"Invalid UTF-8 in {obj.name} UUID") from exc
+    if not isinstance(object_uuid, str) or not object_uuid:
+        return None
+    return object_uuid
 
 
 def build_locators(
@@ -436,6 +458,8 @@ def read_image(h5file: Any, path: str) -> dict[str, Any]:
             except (TypeError, ValueError) as exc:
                 raise ProvenanceFormatError(f"Invalid {name}: {path}") from exc
     else:
+        if arrays["xcoords"] is None or arrays["ycoords"] is None:
+            raise ProvenanceFormatError(f"Missing non-uniform coordinates: {path}")
         result["xcoords"] = arrays["xcoords"]
         result["ycoords"] = arrays["ycoords"]
     return result
@@ -614,6 +638,12 @@ def load_block(
     if block is None:
         return None
     ledger, locators = block
+    for state_id, locator in locators.items():
+        expected = ledger.states[state_id]["object_uuid"]
+        if _object_uuid(_object_node(h5file, locator["path"])) != expected:
+            raise ProvenanceFormatError(
+                f"Locator of {state_id} points to another object: {locator['path']}"
+            )
     altered = _altered_states(h5file, ledger, locators)
     status: dict[str, str] = {}
     for state_id in ledger.states:
