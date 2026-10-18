@@ -92,6 +92,23 @@ def test_unreadable_structure_is_invalid() -> None:
     validate_manifest(manifest)
 
 
+def test_mistyped_references_and_root_fields_are_invalid() -> None:
+    """A non-text @id or root field is an invalid manifest, not a crash."""
+    _data, ledger, locators = _chain()
+    manifest = _manifest(ledger, locators)
+    hostile = copy.deepcopy(manifest)
+    root = next(e for e in hostile["@graph"] if e["@id"] == "./")
+    root["conformsTo"] = [{"@id": 123}]
+    with pytest.raises(ManifestError, match="string @id"):
+        validate_manifest(_refingerprinted(hostile))
+    for key, value in (("name", ["a", "b"]), ("license", {"@id": "x"})):
+        hostile = copy.deepcopy(manifest)
+        root = next(e for e in hostile["@graph"] if e["@id"] == "./")
+        root[key] = value
+        with pytest.raises(ManifestError, match=f"{key} of the root data entity"):
+            validate_manifest(_refingerprinted(hostile))
+
+
 def test_nested_hdf5_metadata_is_refused() -> None:
     """An ROI nested deeper than the limit is refused, not decoded recursively."""
     buffer = io.BytesIO()

@@ -519,7 +519,10 @@ def _entities(manifest: Any) -> dict[str, dict[str, Any]]:
 
 def _refs(value: Any) -> list[str]:
     items = value if isinstance(value, list) else [value]
-    return [item["@id"] for item in items if isinstance(item, dict) and "@id" in item]
+    refs = [item["@id"] for item in items if isinstance(item, dict) and "@id" in item]
+    if not all(isinstance(ref, str) for ref in refs):
+        raise ManifestError("Every reference must be a string @id")
+    return refs
 
 
 def _is_local(ref: str) -> bool:
@@ -552,6 +555,8 @@ def validate_manifest(manifest: Any) -> None:
     for key in ("name", "description", "datePublished", "license"):
         if not root.get(key):
             problems.append(f"The root data entity has no {key}")
+        elif not isinstance(root[key], str):
+            problems.append(f"The {key} of the root data entity must be a text")
     profiles = _refs(root.get("conformsTo"))
     for profile in (PROCESS_RUN_CRATE, PROFILE_IRI):
         if profile not in profiles:
