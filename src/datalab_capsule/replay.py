@@ -144,7 +144,8 @@ def prepare_activity(
          :class:`IneligibleError` (``unsupported_operation`` or
          ``unsupported_contract``).
         find_object: ``object_uuid -> live object or None``.
-        observe_object: ``live object -> state facts`` (fingerprint included).
+        observe_object: ``live object -> state facts`` (fingerprint included);
+         raises :class:`IneligibleError` when the data cannot be observed.
         check_preconditions: ``(contract, objects) -> failing check or None``.
         decode_parameters: ``(contract, values) -> parameters``; raises
          :class:`IneligibleError` (``invalid_parameters``).
@@ -210,8 +211,13 @@ def prepare_activity(
             entry["status"] = "unsupported"
         return refuse("unsupported_context", f"Precondition failed: {failed}", checked)
     for entry, (_role, state_id, obj) in zip(checked, objects):
+        try:
+            facts = observe_object(obj)
+        except IneligibleError as exc:
+            entry["status"] = "unsupported"
+            return refuse(exc.code, str(exc), checked)
         found, reason = compare_state(
-            ledger.states[state_id], observe_object(obj), status.get(state_id)
+            ledger.states[state_id], facts, status.get(state_id)
         )
         if found != "available":
             entry["status"] = found

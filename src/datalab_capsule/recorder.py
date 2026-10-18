@@ -917,12 +917,21 @@ class Recorder:
             holder["prepared"] = prepared
             return list(objs)
 
+        def observe(obj: Any) -> dict[str, Any]:
+            try:
+                return self.facts(obj)
+            except StateUnavailableError as exc:
+                raise IneligibleError(
+                    "unsupported_context",
+                    f"The data of an input are unavailable: {exc}",
+                ) from exc
+
         result = prepare_activity(
             self.ledger,
             activity_id,
             resolve_contract=self.resolve_contract,
             find_object=self.host.find_object,
-            observe_object=self.facts,
+            observe_object=observe,
             check_preconditions=lambda _contract, _objects: None,
             decode_parameters=lambda _contract, values: values,
             state_status=self.state_status,
@@ -1007,16 +1016,21 @@ class Recorder:
             if "state_id" in output:
                 state = self.ledger.states[output["state_id"]]
                 obj = self._state_holder(state)
-                status = output_state_status(
-                    state, obj, self.facts, self.state_status.get(state["state_id"])
-                )
+                try:
+                    status = output_state_status(
+                        state, obj, self.facts, self.state_status.get(state["state_id"])
+                    )
+                except StateUnavailableError:
+                    # The data of the result cannot be read: no reference, as
+                    # for a state not saved in the file
+                    status = "missing"
                 references.append(
                     {
                         "role": output["role"],
                         "recorded": "state",
                         "state_id": state["state_id"],
                         "status": status,
-                        "value": None if status == "missing" else obj,
+                        "value": obj if status in ("available", "altered") else None,
                     }
                 )
                 continue

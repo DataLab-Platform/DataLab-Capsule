@@ -363,6 +363,24 @@ def test_verify(workspace) -> None:
     assert changed["eligibility"] == "input_changed"
 
 
+def test_verify_with_unavailable_data(workspace) -> None:
+    """Data that cannot be read refuse or skip the comparison, never crash."""
+    recorder = Recorder(workspace.host(), computation())
+    src = workspace.add(signal([1.0, 2.0, 3.0, 4.0]), 0)
+    _pending, activity = _run(recorder, workspace, scale, 2.0)
+    activity_id = activity["activity_id"]
+    result = workspace.objects[UUIDS[1]]
+    workspace.unavailable.add(result.uuid)
+    report = recorder.verify(activity_id, lambda p: p.run())
+    assert report["eligibility"] == "ready"
+    assert report["verdict"] == "not_verified"
+    workspace.unavailable = {src.uuid}
+    refused = recorder.prepare(activity_id)
+    assert isinstance(refused, Refusal)
+    assert refused.eligibility == "unsupported_context"
+    assert recorder.verify(activity_id, lambda p: p.run())["verdict"] == "not_verified"
+
+
 def _with_roi(obj, roi):
     obj.roi = roi
     return obj
