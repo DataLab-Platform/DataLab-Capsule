@@ -7,7 +7,11 @@ Layout:
 - group ``/DataLab_Provenance`` with attribute ``schema_version = 1``;
 - dataset ``ledger_json``: UTF-8 ledger;
 - dataset ``locators_json``: UTF-8 mapping ``state_id -> {"kind", "path"}`` for
-  every state present in the file.
+  every state present in the file;
+- optional dataset ``capsule_origin_json``: UTF-8
+  ``{"fingerprint", "name", "attachments"}`` of the capsule the workspace was
+  opened from, so that a revision exported after the workspace was saved and
+  opened again still names its parent (readers without it ignore it).
 
 Readers validate the block before anything else and raise
 :class:`ProvenanceFormatError`, never ``KeyError``. External links, soft links and
@@ -17,6 +21,7 @@ virtual datasets are refused; sizes are checked before reading.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -33,18 +38,21 @@ from datalab_capsule.ledger import Ledger, LedgerError
 __all__ = [
     "BLOCK_GROUP",
     "BLOCK_SCHEMA_VERSION",
+    "CAPSULE_ORIGIN_DATASET",
     "MAX_IMAGE_BYTES",
     "MAX_JSON_BYTES",
     "MAX_SIGNAL_BYTES",
     "PANEL_ROOTS",
     "ProvenanceFormatError",
     "build_locators",
+    "check_capsule_origin",
     "has_block",
     "load_block",
     "load_ledger",
     "locate_current_states",
     "locate_fingerprints",
     "read_block",
+    "read_capsule_origin",
     "read_image",
     "read_roi",
     "read_signal",
@@ -66,6 +74,11 @@ MAX_IMAGE_BYTES = 2 * 1024**3
 ROI_METADATA_KEY = "_roi_"
 #: Largest number of HDF5 nodes decoded for one ROI definition.
 MAX_ROI_NODES = 10_000
+#: Dataset of the block naming the capsule the workspace was opened from.
+CAPSULE_ORIGIN_DATASET = "capsule_origin_json"
+#: Largest number of attachment names accepted in a capsule origin.
+MAX_ORIGIN_ATTACHMENTS = 1000
+_MANIFEST_FINGERPRINT = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 class ProvenanceFormatError(ProvenanceError, ValueError):
@@ -123,11 +136,53 @@ def has_block(h5file: Any) -> bool:
     return BLOCK_GROUP in h5file
 
 
+def check_capsule_origin(origin: Any) -> dict[str, Any]:
+    """Return a checked copy of a capsule origin.
+
+    Args:
+        origin: ``{"fingerprint", "name", "attachments"}`` (see
+         :func:`datalab_capsule.exchange.capsule_origin`).
+
+    Raises:
+        ProvenanceFormatError: If *origin* does not have that form.
+    """
+    if not isinstance(origin, Mapping) or set(origin) != {
+        "fingerprint",
+        "name",
+        "attachments",
+    }:
+        raise ProvenanceFormatError("Invalid capsule origin")
+    fingerprint, name = origin["fingerprint"], origin["name"]
+    attachments = origin["attachments"]
+    if not isinstance(fingerprint, str) or not _MANIFEST_FINGERPRINT.match(fingerprint):
+        raise ProvenanceFormatError("Invalid capsule origin fingerprint")
+    if name is not None and not isinstance(name, str):
+        raise ProvenanceFormatError("Invalid capsule origin name")
+    if (
+        not isinstance(attachments, (list, tuple))
+        or len(attachments) > MAX_ORIGIN_ATTACHMENTS
+        or not all(isinstance(item, str) for item in attachments)
+    ):
+        raise ProvenanceFormatError("Invalid capsule origin attachments")
+    return {"fingerprint": fingerprint, "name": name, "attachments": list(attachments)}
+
+
 def write_block(
-    h5file: Any, ledger: Ledger, locators: Mapping[str, Mapping[str, str]]
+    h5file: Any,
+    ledger: Ledger,
+    locators: Mapping[str, Mapping[str, str]],
+    capsule_origin: Mapping[str, Any] | None = None,
 ) -> None:
-    """Write (or replace) the provenance block of an open, writable HDF5 file."""
+    """Write (or replace) the provenance block of an open, writable HDF5 file.
+
+    Args:
+        h5file: Open, writable HDF5 file.
+        ledger: Ledger to write.
+        locators: ``state_id -> {"kind", "path"}`` of the states in the file.
+        capsule_origin: Capsule the workspace was opened from, or None.
+    """
     h5py = _h5py()
+    origin = None if capsule_origin is None else check_capsule_origin(capsule_origin)
     if BLOCK_GROUP in h5file:
         del h5file[BLOCK_GROUP]
     group = h5file.create_group(BLOCK_GROUP)
@@ -136,6 +191,9 @@ def write_block(
     group.create_dataset("ledger_json", data=ledger.to_json(), dtype=dtype)
     locators_text = json.dumps(dict(locators), ensure_ascii=False, sort_keys=True)
     group.create_dataset("locators_json", data=locators_text, dtype=dtype)
+    if origin is not None:
+        origin_text = json.dumps(origin, ensure_ascii=False, sort_keys=True)
+        group.create_dataset(CAPSULE_ORIGIN_DATASET, data=origin_text, dtype=dtype)
 
 
 def _check_path(path: Any) -> None:
@@ -183,6 +241,33 @@ def read_block(h5file: Any) -> tuple[Ledger, dict[str, dict[str, str]]] | None:
             raise ProvenanceFormatError(f"Locator kind mismatch for {state_id}")
         _check_path(locator["path"])
     return ledger, locators
+
+
+def read_capsule_origin(h5file: Any) -> dict[str, Any] | None:
+    """Read the capsule the workspace was opened from, if the block names one.
+
+    Returns:
+        ``{"fingerprint", "name", "attachments"}``, or None.
+
+    Raises:
+        ProvenanceFormatError: If the origin is present but invalid.
+    """
+    h5py = _h5py()
+    if BLOCK_GROUP not in h5file:
+        return None
+    _check_link(h5file, BLOCK_GROUP)
+    group = h5file[BLOCK_GROUP]
+    if not isinstance(group, h5py.Group):
+        raise ProvenanceFormatError(f"{BLOCK_GROUP} must be a group")
+    if CAPSULE_ORIGIN_DATASET not in group:
+        return None
+    try:
+        origin = load_json(_read_text(group, CAPSULE_ORIGIN_DATASET))
+    except ValueError as exc:
+        if isinstance(exc, ProvenanceFormatError):
+            raise
+        raise ProvenanceFormatError(f"Invalid capsule origin: {exc}") from exc
+    return check_capsule_origin(origin)
 
 
 def scan_object_index(h5file: Any) -> dict[str, dict[str, str]]:
@@ -475,9 +560,17 @@ def _altered_states(
     return altered
 
 
-def save_ledger(h5file: Any, ledger: Ledger) -> None:
-    """Write the provenance block of a workspace file, after its panels."""
-    write_block(h5file, ledger, locate_current_states(h5file, ledger))
+def save_ledger(
+    h5file: Any, ledger: Ledger, capsule_origin: Mapping[str, Any] | None = None
+) -> None:
+    """Write the provenance block of a workspace file, after its panels.
+
+    Args:
+        h5file: Open, writable HDF5 file holding the saved panels.
+        ledger: Ledger to write.
+        capsule_origin: Capsule the workspace was opened from, or None.
+    """
+    write_block(h5file, ledger, locate_current_states(h5file, ledger), capsule_origin)
 
 
 def load_block(

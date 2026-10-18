@@ -16,12 +16,14 @@ from datalab_capsule import hdf5 as hdf5_module
 from datalab_capsule.compare import validate_report
 from datalab_capsule.hdf5 import (
     BLOCK_GROUP,
+    CAPSULE_ORIGIN_DATASET,
     ProvenanceFormatError,
     build_locators,
     load_ledger,
     locate_current_states,
     locate_fingerprints,
     read_block,
+    read_capsule_origin,
     read_image,
     read_roi,
     read_signal,
@@ -405,6 +407,62 @@ def test_oversized_json_text_is_refused(monkeypatch) -> None:
         monkeypatch.setattr(hdf5_module, "MAX_JSON_BYTES", 64)
         with pytest.raises(ProvenanceFormatError, match="too large"):
             read_block(h5file)
+
+
+ORIGIN = {
+    "fingerprint": "sha256:" + "a" * 64,
+    "name": "parent",
+    "attachments": ["protocol.txt"],
+}
+
+
+def test_capsule_origin_is_saved_with_the_block() -> None:
+    """The capsule origin is written when known and read back checked."""
+    ledger = Ledger()
+    with _memory_file() as h5file:
+        save_ledger(h5file, ledger)
+        assert CAPSULE_ORIGIN_DATASET not in h5file[BLOCK_GROUP]
+        assert read_capsule_origin(h5file) is None
+        save_ledger(h5file, ledger, ORIGIN)
+        assert read_capsule_origin(h5file) == ORIGIN
+        # Readers of the ledger alone are not affected.
+        assert load_ledger(h5file) is not None
+    with _memory_file() as h5file:
+        assert read_capsule_origin(h5file) is None
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        {**ORIGIN, "fingerprint": "sha256:xyz"},
+        {**ORIGIN, "name": 3},
+        {**ORIGIN, "attachments": "protocol.txt"},
+        {**ORIGIN, "attachments": [1]},
+        {**ORIGIN, "extra": True},
+        {"fingerprint": ORIGIN["fingerprint"]},
+        [ORIGIN],
+    ],
+)
+def test_invalid_capsule_origin_is_refused(origin) -> None:
+    """An invalid origin is never written, and refused when read."""
+    with _memory_file() as h5file:
+        with pytest.raises(ProvenanceFormatError):
+            write_block(h5file, Ledger(), {}, origin)
+        write_block(h5file, Ledger(), {})
+        h5file[BLOCK_GROUP].create_dataset(
+            CAPSULE_ORIGIN_DATASET,
+            data=json.dumps(origin),
+            dtype=h5py.string_dtype("utf-8"),
+        )
+        with pytest.raises(ProvenanceFormatError):
+            read_capsule_origin(h5file)
+    with _memory_file() as h5file:
+        write_block(h5file, Ledger(), {})
+        h5file[BLOCK_GROUP].create_dataset(
+            CAPSULE_ORIGIN_DATASET, data="{", dtype=h5py.string_dtype("utf-8")
+        )
+        with pytest.raises(ProvenanceFormatError):
+            read_capsule_origin(h5file)
 
 
 def test_links_are_refused(tmp_path: Path) -> None:

@@ -434,6 +434,39 @@ def test_lifecycle_and_legacy_import(workspace) -> None:
     assert not recorder.ledger.activities
 
 
+def test_capsule_origin_survives_the_workspace_file(workspace) -> None:
+    """Saving and opening the workspace again keeps the parent capsule."""
+    origin = {
+        "fingerprint": "sha256:" + "b" * 64,
+        "name": "parent",
+        "attachments": [],
+    }
+    recorder = Recorder(workspace.host(), computation())
+    workspace.add(signal([1.0, 2.0, 3.0, 4.0]), 0)
+    _run(recorder, workspace, scale, 2.0)
+    recorder.capsule_origin = dict(origin)
+    buffer = io.BytesIO()
+    with h5py.File(buffer, "w") as h5file:
+        recorder.save(h5file)
+        block = recorder.read(h5file)
+    assert block[2] == origin
+    # Opened again, replacing the workspace: the origin is restored.
+    recorder.reset()
+    assert recorder.capsule_origin is None
+    recorder.load(block, replaced=True)
+    assert recorder.capsule_origin == origin
+    # Appended to a workspace: the origin of the current workspace is kept.
+    other = {**origin, "fingerprint": "sha256:" + "c" * 64}
+    recorder.load((block[0], block[1], other), replaced=False)
+    assert recorder.capsule_origin == origin
+    # A file without origin (or a block without it) opens without parent.
+    recorder.load(block[:2], replaced=True)
+    assert recorder.capsule_origin is None
+    recorder.capsule_origin = dict(origin)
+    recorder.load(None, replaced=True)
+    assert recorder.capsule_origin is None
+
+
 def test_recorder_reads_images(workspace) -> None:
     """Images are compared on their data and coordinates."""
     from datalab_capsule.recorder import comparison_rows

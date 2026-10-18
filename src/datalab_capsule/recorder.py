@@ -38,7 +38,7 @@ from datalab_capsule.compare import (
     compare_rows,
 )
 from datalab_capsule.environment import collect_environment, environment_id
-from datalab_capsule.hdf5 import load_ledger, save_ledger
+from datalab_capsule.hdf5 import load_ledger, read_capsule_origin, save_ledger
 from datalab_capsule.inspection import (
     IDENTITY_LIMIT,
     Inspector,
@@ -309,16 +309,21 @@ class Recorder:
         self.capture_failures = 0
         #: ``"loaded"`` or ``"absent"`` after opening a workspace file, else None.
         self.file_status: str | None = None
+        #: ``{"fingerprint", "name", "attachments"}`` of the capsule the
+        #: workspace was opened from (the parent of a revision exported later),
+        #: saved with the workspace and restored when it is opened again.
+        self.capsule_origin: dict[str, Any] | None = None
         self._index: Any = None
 
     # -- Workspace lifecycle ------------------------------------------------
 
     def reset(self) -> None:
-        """Start an empty ledger for a new workspace."""
+        """Start an empty ledger for a new workspace (no capsule origin)."""
         self.ledger = Ledger()
         self.file_status = None
         self.state_status = {}
         self.notices = []
+        self.capsule_origin = None
         self._deferred = None
         self._index = None
 
@@ -336,24 +341,30 @@ class Recorder:
         self._environment = None
 
     def save(self, h5file: Any) -> None:
-        """Write the ledger block into a workspace file, after its panels."""
-        save_ledger(h5file, self.ledger)
+        """Write the ledger block (and the capsule origin) into a workspace file,
+        after its panels."""
+        save_ledger(h5file, self.ledger, self.capsule_origin)
 
     @staticmethod
-    def read(h5file: Any) -> tuple[Ledger, dict[str, str]] | None:
+    def read(
+        h5file: Any,
+    ) -> tuple[Ledger, dict[str, str], dict[str, Any] | None] | None:
         """Read and validate the block of a workspace file.
 
         Returns:
-            ``(ledger, state_status)``, or None without block.
+            ``(ledger, state_status, capsule_origin)``, or None without block.
 
         Raises:
             ProvenanceFormatError: If the block is invalid.
         """
-        return load_ledger(h5file)
+        block = load_ledger(h5file)
+        if block is None:
+            return None
+        return (*block, read_capsule_origin(h5file))
 
     def load(
         self,
-        block: tuple[Ledger, dict[str, str]] | None,
+        block: tuple[Any, ...] | None,
         replaced: bool,
         saved_version: str | None = None,
         current_version: str | None = None,
@@ -365,10 +376,12 @@ class Recorder:
         without provenance) are then imported as ``legacy_metadata`` activities.
 
         Args:
-            block: ``(ledger, state_status)`` read before the workspace was
-             replaced, or None when the file has no provenance block.
+            block: ``(ledger, state_status[, capsule_origin])`` read before the
+             workspace was replaced (see :meth:`read`), or None when the file
+             has no provenance block.
             replaced: False when the file was appended to the current workspace:
-             ledgers are not merged and the file's block is ignored.
+             ledgers are not merged and the file's block is ignored (the capsule
+             origin of the current workspace is kept).
             saved_version: Application version that saved the file, as stored.
             current_version: Version compared with *saved_version*, or None.
             appended: Objects added to the workspace by an appended file. Those
@@ -387,7 +400,8 @@ class Recorder:
         if block is None:
             self.file_status = "absent"
         else:
-            self.ledger, self.state_status = block
+            self.ledger, self.state_status = block[0], block[1]
+            self.capsule_origin = block[2] if len(block) > 2 else None
             self.file_status = "loaded"
             self._index = None
         self._import_legacy(saved_version, current_version)
