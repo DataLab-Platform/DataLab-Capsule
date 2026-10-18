@@ -160,7 +160,14 @@ def test_manifest_validation_of_attachments() -> None:
         create_from_hdf5(workspace_bytes(), date_published=DATE, attachments=[NOTE])
     ).manifest
     target = "attachments/protocol.txt"
-    for field, value in (("sha256", "zz"), ("contentSize", "-3"), (ATTACHMENT_KEY, 1)):
+    for field, value in (
+        ("sha256", "zz"),
+        ("contentSize", "-3"),
+        (ATTACHMENT_KEY, 1),
+        # The name is the file name of the attachment, never another path
+        ("name", "../../escaped.txt"),
+        ("name", "other.txt"),
+    ):
         hostile = copy.deepcopy(manifest)
         entity = next(e for e in hostile["@graph"] if e["@id"] == target)
         entity[field] = value

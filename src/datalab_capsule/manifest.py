@@ -587,6 +587,11 @@ def validate_manifest(manifest: Any) -> None:
             )
         except (ManifestError, TypeError, ValueError) as exc:
             problems.append(f"{entity['@id']}: {exc}")
+        if entity.get("name") != attachment_name(entity):
+            # The name is the file name in the archive, nothing else
+            problems.append(
+                f"{entity['@id']}: the name of an attachment is its file name"
+            )
         if entity.get("@type") != "File" or entity.get(ATTACHMENT_KEY) is not True:
             problems.append(f"{entity['@id']}: an attachment is a File marked true")
     try:
@@ -748,7 +753,7 @@ def inspect_manifest(manifest: Any) -> dict[str, Any]:
         },
         "attachments": [
             {
-                "name": entity.get("name"),
+                "name": attachment_name(entity),
                 "media_type": entity.get("encodingFormat"),
                 "size": entity.get("contentSize"),
                 "sha256": entity.get("sha256"),

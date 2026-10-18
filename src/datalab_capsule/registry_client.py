@@ -24,6 +24,7 @@ from datalab_capsule.archive import MAX_ATTACHMENT_BYTES, read_capsule
 from datalab_capsule.integrity import ProvenanceError, load_json, sha256_digest
 from datalab_capsule.manifest import (
     MANIFEST_NAME,
+    check_attachment_name,
     inspect_manifest,
     manifest_fingerprint,
     validate_manifest,
@@ -250,6 +251,8 @@ def fetch_revision(client: RegistryClient, fingerprint: str) -> dict[str, Any]:
     attachments = []
     for declared in inspect_manifest(manifest)["attachments"]:
         name, data, status = declared["name"], None, "valid"
+        # The name is written as a file name by callers: never trust it unchecked
+        check_attachment_name(name)
         try:
             fetched = client.get_attachment(
                 fingerprint, name, min(int(declared["size"]), MAX_ATTACHMENT_BYTES)
