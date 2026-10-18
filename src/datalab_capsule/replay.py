@@ -16,7 +16,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from datalab_capsule.calls import is_opaque
-from datalab_capsule.integrity import ProvenanceError
+from datalab_capsule.integrity import ProvenanceError, roi_facts
 from datalab_capsule.ledger import Ledger
 
 __all__ = [
@@ -56,8 +56,8 @@ class Plan:
         parameters: Rebuilt parameter set.
         inputs: Ordered ``(role, state_id, live object)`` triples.
         call_inputs: Objects to pass to the function, in role order, after the
-         recorded context was applied (e.g. X alignment); the live objects are
-         never modified.
+         recorded context was applied (e.g. X alignment, or a recorded ROI
+         restored on a copy); the live objects are never modified.
     """
 
     activity: dict[str, Any]
@@ -107,7 +107,8 @@ def compare_state(
     Returns:
         ``(status, reason)``: ``available`` (same state, empty reason),
         ``unsupported`` (no fingerprint to compare), ``altered`` (the data were
-        altered in the file) or ``changed``.
+        altered in the file), ``changed`` (other data), or ``roi_changed`` (same
+        data, other ROI: the recorded ROI definition can be applied to a copy).
     """
     recorded = state["fingerprint"]
     if recorded is None or facts.get("fingerprint") is None:
@@ -118,8 +119,28 @@ def compare_state(
         return "changed", "Input changed since the activity"
     recorded_roi = (state.get("roi") or {}).get("digest")
     if (facts.get("roi") or {}).get("digest") != recorded_roi:
-        return "changed", "Input region of interest changed since the activity"
+        return "roi_changed", "Input region of interest changed since the activity"
     return "available", ""
+
+
+def _restored(
+    state: Mapping[str, Any],
+    obj: Any,
+    restore_roi: Callable[[Any, Any], Any] | None,
+) -> tuple[Any, str]:
+    """Return a copy of *obj* with the ROI of *state*, or ``(None, reason)``."""
+    reason = "Input region of interest changed since the activity"
+    if restore_roi is None:
+        return None, reason
+    recorded = state.get("roi")
+    try:
+        copy = restore_roi(obj, None if recorded is None else recorded["definition"])
+        facts = roi_facts(getattr(copy, "roi", None))
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        return None, f"{reason}; the recorded one cannot be restored: {exc}"
+    if (facts or {}).get("digest") != (recorded or {}).get("digest"):
+        return None, f"{reason}; the recorded one cannot be restored identically"
+    return copy, ""
 
 
 def prepare_activity(
@@ -134,6 +155,7 @@ def prepare_activity(
     state_status: Mapping[str, str] | None = None,
     apply_context: Callable[[Any, list[Any], dict[str, Any]], list[Any]] | None = None,
     find_state_object: Callable[[Mapping[str, Any]], Any] | None = None,
+    restore_roi: Callable[[Any, Any], Any] | None = None,
 ) -> Plan | Refusal:
     """Prepare a recorded activity for replay.
 
@@ -158,6 +180,10 @@ def prepare_activity(
          instead of *find_object* to find the object of an input state (e.g.
          applying identity breaks, see
          :func:`datalab_capsule.inspection.holder_of_state`).
+        restore_roi: ``(live object, recorded ROI definition or None) -> copy``:
+         when the data of an input are unchanged but its ROI changed (e.g. ROIs
+         added by a detection), the computation is replayed on such a copy with
+         the recorded ROI. Without it, the input is refused as changed.
 
     Returns:
         A :class:`Plan`, or a :class:`Refusal` with its eligibility code.
@@ -210,20 +236,24 @@ def prepare_activity(
         for entry in checked:
             entry["status"] = "unsupported"
         return refuse("unsupported_context", f"Precondition failed: {failed}", checked)
-    for entry, (_role, state_id, obj) in zip(checked, objects):
+    live = [obj for _r, _s, obj in objects]
+    for position, (entry, (_role, state_id, obj)) in enumerate(zip(checked, objects)):
         try:
             facts = observe_object(obj)
         except IneligibleError as exc:
             entry["status"] = "unsupported"
             return refuse(exc.code, str(exc), checked)
-        found, reason = compare_state(
-            ledger.states[state_id], facts, status.get(state_id)
-        )
+        state = ledger.states[state_id]
+        found, reason = compare_state(state, facts, status.get(state_id))
+        if found == "roi_changed":
+            live[position], reason = _restored(state, obj, restore_roi)
+            if live[position] is not None:
+                continue
+            found = "changed"
         if found != "available":
             entry["status"] = found
             code = "unsupported_context" if found == "unsupported" else "input_changed"
             return refuse(code, reason, checked)
-    live = [obj for _r, _s, obj in objects]
     call_inputs = live
     if apply_context is not None:
         try:

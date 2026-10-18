@@ -279,7 +279,9 @@ class Inspector:
         facts = self._live_facts(obj)
         if facts is None:
             return "unavailable"
-        return compare_state(state, facts, self.state_status.get(state["state_id"]))[0]
+        found = compare_state(state, facts, self.state_status.get(state["state_id"]))[0]
+        # The object differs from the state, even if a replay can restore its ROI
+        return "changed" if found == "roi_changed" else found
 
     def _output_check(self, state: Mapping[str, Any], obj: Any) -> str:
         def facts(live: Any) -> Any:

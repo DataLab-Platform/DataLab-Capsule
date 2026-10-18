@@ -607,6 +607,10 @@ def test_computation_from_the_sigima_contracts_package() -> None:
     contract = SimpleNamespace(comparison=None, qualification_status="qualified")
     assert computed.comparison_rule(contract) is None
     assert computed.qualification_status(contract) == "qualified"
+    # ROI restoration comes from the package when it provides it
+    assert computed.with_roi is None
+    package.with_roi = _restore = lambda obj, definition: obj
+    assert computation_from_sigima(package).with_roi is _restore
 
 
 def test_metadata_read_by_the_computation(workspace) -> None:

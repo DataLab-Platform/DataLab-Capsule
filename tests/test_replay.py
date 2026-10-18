@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -314,6 +316,96 @@ def test_prepare_checks_the_input_roi(recorded, live, ready) -> None:
         assert result.eligibility == "input_changed"
         assert "region of interest" in result.reason
         assert [i["status"] for i in result.input_statuses] == ["changed"]
+
+
+def _restore_roi(obj, definition):
+    """Return a copy of a duck-typed signal with the ROI *definition*."""
+    roi = None
+    if definition is not None:
+        (single,) = definition["single_rois"]
+        roi = ROI(single["coords"], kind=single["type"])
+    return SimpleNamespace(**{**vars(obj), "roi": roi})
+
+
+@pytest.mark.parametrize(
+    ("recorded", "live"),
+    [
+        (None, ROI([0.0, 0.5])),
+        (ROI([0.0, 0.5]), None),
+        (ROI([0.0, 0.5]), ROI([0.0, 0.75])),
+    ],
+)
+def test_prepare_restores_the_recorded_roi(recorded, live) -> None:
+    """Same data, other ROI: the call runs on a copy with the recorded ROI."""
+    ledger = Ledger()
+    values = [-2.0, 0.0, 1.0, 4.0]
+    state = ledger.observe(SRC_UUID, signal_state_facts(signal(values, roi=recorded)))
+    act = ledger.record_activity(
+        call=make_call(
+            "sigima.signal.normalize", 1, {"method": "maximum"}, [("source", state)]
+        ),
+        outputs=[("result", DST_UUID, signal_state_facts(signal([-0.5, 0, 0.25, 1])))],
+        environment=collect_environment("desktop", "1.4.0", packages=()),
+        edition="desktop",
+        origin="ordinary",
+    )
+    source = signal(values, roi=live)
+    seen = []
+
+    def apply_context(contract, objs, context):
+        seen.extend(objs)
+        return objs
+
+    plan = _prepare(
+        ledger,
+        act["activity_id"],
+        {SRC_UUID: source},
+        check_preconditions=lambda c, objs: None,
+        apply_context=apply_context,
+        restore_roi=_restore_roi,
+    )
+    assert isinstance(plan, Plan)
+    (copy,) = plan.call_inputs
+    assert seen == [copy] and copy is not source and plan.inputs[0][2] is source
+    assert signal_state_facts(copy).get("roi") == signal_state_facts(
+        signal(values, roi=recorded)
+    ).get("roi")
+    assert source.roi is live
+    # Data changed too: the ROI is not restored, the input is refused.
+    changed = _prepare(
+        ledger,
+        act["activity_id"],
+        {SRC_UUID: signal([-2.0, 0.0, 1.0, 5.0], roi=live)},
+        check_preconditions=lambda c, objs: None,
+        restore_roi=_restore_roi,
+    )
+    assert changed.eligibility == "input_changed"
+
+
+def _failing_restore(obj, definition):
+    raise ValueError("unknown ROI type")
+
+
+@pytest.mark.parametrize(
+    ("restore", "detail"),
+    [
+        (lambda obj, definition: obj, "cannot be restored identically"),
+        (_failing_restore, "unknown ROI type"),
+    ],
+)
+def test_prepare_refuses_a_roi_that_cannot_be_restored(restore, detail) -> None:
+    """A restoration that fails or gives another ROI refuses the input."""
+    ledger, act_id = _ledger_with_activity()
+    refusal = _prepare(
+        ledger,
+        act_id,
+        {SRC_UUID: signal([-2.0, 0.0, 1.0, 4.0], roi=ROI([0.0, 0.5]))},
+        check_preconditions=lambda c, objs: None,
+        restore_roi=restore,
+    )
+    assert refusal.eligibility == "input_changed"
+    assert detail in refusal.reason
+    assert [i["status"] for i in refusal.input_statuses] == ["changed"]
 
 
 def test_compare_complex_keeps_the_imaginary_part() -> None:

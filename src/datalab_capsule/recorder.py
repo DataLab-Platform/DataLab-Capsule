@@ -149,6 +149,10 @@ class Computation:
         artifact_value: ``(analysis result) -> stored form``: the form in which
          the editions store an analysis result in object metadata (by default,
          its ``to_dict()``), compared with the recorded one.
+        with_roi: ``(object, ROI definition or None) -> copy`` with that ROI
+         (see ``sigima.proc.contracts.with_roi``), used to replay an input whose
+         ROI changed since the activity; None when unavailable (such inputs are
+         then refused as changed).
     """
 
     describe_call: Callable[..., dict[str, Any]]
@@ -161,6 +165,7 @@ class Computation:
         "qualified" if contract.qualified else "not_qualified"
     )
     artifact_value: Callable[[Any], Any] = lambda result: result.to_dict()
+    with_roi: Callable[[Any, Any], Any] | None = None
 
 
 def computation_from_sigima(contracts: Any) -> Computation:
@@ -199,6 +204,8 @@ def computation_from_sigima(contracts: Any) -> Computation:
             None if contract.comparison is None else contract.comparison.to_dict()
         ),
         qualification_status=lambda contract: contract.qualification_status,
+        # Absent from Sigima versions without ROI restoration
+        with_roi=getattr(contracts, "with_roi", None),
     )
 
 
@@ -941,6 +948,7 @@ class Recorder:
             state_status=self.state_status,
             apply_context=apply_context,
             find_state_object=self._state_holder,
+            restore_roi=self.computation.with_roi,
         )
         return result, holder.get("prepared")
 
