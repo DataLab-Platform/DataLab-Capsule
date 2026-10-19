@@ -1,10 +1,11 @@
 # Build, check and publish a DataLab-Capsule release.
 #
 # Triggers:
-#   * push of a tag vX.Y.Z (no pre-release suffix): tests, build, artifact
-#     checks, PyPI publication (Trusted Publishing) and a draft GitHub release;
-#   * manual run (workflow_dispatch) or branch push changing the packaging: dry
-#     run, the same tests, build and checks, never publishes.
+#   * push of a tag vX.Y.Z (digits only: no pre-release, development or local
+#     suffix): tests, build, artifact checks, PyPI publication (Trusted
+#     Publishing) and a draft GitHub release;
+#   * manual run (workflow_dispatch, even on a tag) or branch push changing the
+#     packaging: dry run, the same tests, build and checks, never publishes.
 #
 # Prerequisites (one-time, off-CI): PyPI Trusted Publishing for the project
 # "DataLab-Capsule" -> this repository, workflow "release.yml", environment
@@ -15,6 +16,9 @@ on:
   push:
     tags:
       - "v[0-9]*.[0-9]*.[0-9]*"
+      # A letter or a dash after the "v" (v1.0.0rc1, v1.0.0-beta...); the build
+      # job also refuses any other tag than vX.Y.Z
+      - "!v*[a-zA-Z]*"
       - "!v*-*"
     # Path filters only apply to branch pushes, never to tags.
     branches:
@@ -46,6 +50,13 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      - name: Check the release tag
+        if: github.ref_type == 'tag'
+        run: |
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "Not a final release tag: $GITHUB_REF_NAME" >&2
+            exit 1
+          }
       # On a tag, the resources of the wheel are checked against the
       # published profile; development pushes may precede its publication.
       - name: Check out the published profile
@@ -93,7 +104,7 @@ jobs:
 
   publish-pypi:
     name: Publish to PyPI
-    if: github.ref_type == 'tag'
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: build
     runs-on: ubuntu-latest
     environment:
@@ -110,7 +121,7 @@ jobs:
 
   github-release:
     name: Draft GitHub release
-    if: github.ref_type == 'tag'
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: publish-pypi
     runs-on: ubuntu-latest
     permissions:
