@@ -126,7 +126,7 @@ def check(dist: Path, version: str | None) -> Path:
         for line in ENTRY_POINTS:
             if line not in entry_points:
                 _fail(f"wheel lacks the command {line!r}")
-        if metadata["Name"] != "DataLab-Capsule":
+        if metadata["Name"] != "datalab-capsule":
             _fail(f"distribution name is {metadata['Name']!r}")
     print(f"wheel: {len(names)} files, package data, licence, commands, requirements")
 

@@ -10,7 +10,7 @@ The registry stores manifests, the attachments they declare and reviews; it neve
 
 ```bash
 python -m venv /opt/capsule-registry
-/opt/capsule-registry/bin/pip install "DataLab-Capsule[registry]"
+/opt/capsule-registry/bin/pip install "datalab-capsule[registry]"
 export REGISTRY_TOKEN="$(openssl rand -hex 32)"   # keep it in a secret store, not in shell history
 /opt/capsule-registry/bin/workspace-capsule-registry /var/lib/capsule-registry \
     --host 127.0.0.1 --port 8765 --token-env REGISTRY_TOKEN \

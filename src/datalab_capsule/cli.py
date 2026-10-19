@@ -364,7 +364,7 @@ def _create(args: argparse.Namespace) -> int:
     try:
         import h5py  # noqa: F401  # pylint: disable=import-outside-toplevel,unused-import
     except ImportError:
-        print('create needs h5py: pip install "DataLab-Capsule[hdf5]"', file=sys.stderr)
+        print('create needs h5py: pip install "datalab-capsule[hdf5]"', file=sys.stderr)
         return 1
     attachments = []
     for name in args.attach:
@@ -481,7 +481,7 @@ def registry_main(argv: Sequence[str] | None = None) -> int:
     if any(importlib.util.find_spec(name) is None for name in ("fastapi", "uvicorn")):
         print(
             "The registry needs FastAPI and uvicorn: "
-            'pip install "DataLab-Capsule[registry]"',
+            'pip install "datalab-capsule[registry]"',
             file=sys.stderr,
         )
         return 1

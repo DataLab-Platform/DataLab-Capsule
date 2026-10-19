@@ -15,7 +15,7 @@ The `workspace-capsule` command line is an independent tool for the same checks,
 
 ## Prerequisites
 
-- Operator A: DataLab (Desktop) with its capsule dialog. The command line is optional: `pip install DataLab-Capsule` for `validate`, `inspect`, `verify` and `diff`; `create` also needs `pip install "DataLab-Capsule[hdf5]"`, and the registry server `pip install "DataLab-Capsule[registry]"`.
+- Operator A: DataLab (Desktop) with its capsule dialog. The command line is optional: `pip install datalab-capsule` for `validate`, `inspect`, `verify` and `diff`; `create` also needs `pip install "datalab-capsule[hdf5]"`, and the registry server `pip install "datalab-capsule[registry]"`.
 - Operator B: DataLab-Web in Chromium, Firefox or Edge, with DataLab-Capsule available to the runtime.
 - Exchanging capsules needs no server: without a registry, no account is needed and the capsule travels by any means (mail, shared folder, removable drive). DataLab Desktop and the command line then work without network access.
 - DataLab-Web, however, cannot start offline: when it starts, the browser downloads its Python runtime (Pyodide) and packages from the network, and a few operations download an optional package on first use (OpenCV for one blob detection); see [interoperability](interoperability.md). Capsules and their data are never sent: checking, opening and replaying happen in the browser.

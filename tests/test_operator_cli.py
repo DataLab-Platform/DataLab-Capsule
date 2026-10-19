@@ -63,7 +63,7 @@ def test_create_without_h5py_says_what_to_install(
     monkeypatch.setitem(sys.modules, "h5py", None)
     workspace = str(WORKSPACES / "desktop_chain.h5")
     assert main(["create", workspace, str(tmp_path / "x.dlcapsule")]) == 1
-    assert "DataLab-Capsule[hdf5]" in capsys.readouterr().err
+    assert "datalab-capsule[hdf5]" in capsys.readouterr().err
     assert not (tmp_path / "x.dlcapsule").exists()
 
 
@@ -78,7 +78,7 @@ def test_registry_server_without_its_extra_says_what_to_install(
         lambda name, *args: None if name == "fastapi" else real_find_spec(name, *args),
     )
     assert registry_main([str(tmp_path / "registry")]) == 1
-    assert "DataLab-Capsule[registry]" in capsys.readouterr().err
+    assert "datalab-capsule[registry]" in capsys.readouterr().err
     assert not (tmp_path / "registry").exists()
 
 

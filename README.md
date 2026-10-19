@@ -2,7 +2,7 @@
 
 Exchange and verify scientific workspace provenance as open RO-Crate capsules (library and CLI, no DataLab required).
 
-Status: experimental. Version 0.1.0 is the first public release, on PyPI as `DataLab-Capsule`; it implements the experimental [DataLab capsule profile 0.1](https://datalab-platform.com/capsule/0.1), which may still change.
+Status: experimental. Version 0.1.0 is the first public release, on PyPI as `datalab-capsule`; it implements the experimental [DataLab capsule profile 0.1](https://datalab-platform.com/capsule/0.1), which may still change.
 
 ## Scope
 
@@ -26,7 +26,7 @@ Users of DataLab Desktop and DataLab-Web need nothing more than their edition: b
 
 The package itself is installed in one of three ways, which must not be mixed up:
 
-- **Released version**, for users of the command line and third-party readers: `pip install DataLab-Capsule`, with the `hdf5` extra to create capsules or check stored states and the `registry` extra to run a registry.
+- **Released version**, for users of the command line and third-party readers: `pip install datalab-capsule`, with the `hdf5` extra to create capsules or check stored states and the `registry` extra to run a registry.
 - **Candidate qualification**, before a release: a wheel and an sdist built from the commit to qualify (`python -m build`), checked with `scripts/check_dist.py` and `scripts/check_profile.py`, then installed in a clean environment, outside the checkout.
 - **Development**: editable install of this checkout, used by the sibling checkouts of DataLab and DataLab-Web (see [developer notes](doc/development.md)).
 
@@ -86,7 +86,7 @@ python examples/third_party_reader.py workspace.dlcapsule
 A small registry publishes and serves capsule manifests, the attachments they declare and their reviews, so that revisions can be found, compared and discussed. It never stores workspaces: a manifest names its workspace by SHA-256 and size (and by address when it is referenced). Everything keeps working without a registry. Manifests are validated and identified by their fingerprint, attachments must match their declared size and SHA-256, reviews must target a published revision. Metadata is kept in SQLite and documents in files.
 
 ```powershell
-pip install "DataLab-Capsule[registry]"
+pip install "datalab-capsule[registry]"
 $env:REGISTRY_TOKEN = "<secret>"
 workspace-capsule-registry registry-data --token-env REGISTRY_TOKEN --origin https://web.example
 ```

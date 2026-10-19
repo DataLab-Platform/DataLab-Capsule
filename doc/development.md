@@ -45,7 +45,7 @@ The other repositories use the checkout directly:
 | --- | --- | --- | --- |
 | Development | Editable install of this checkout | `.env` puts the sibling checkouts on `PYTHONPATH` (`scripts/run_with_env.py`) | `developmentRef` pins (CI) or `VITE_DATALAB_CAPSULE_INSTALL_SPEC` (local wheel) |
 | Candidate qualification | Wheel and sdist built from the commit, `scripts/check_dist.py`, `scripts/check_profile.py --package dist/<wheel>`, clean environments outside the checkout | Clean environment with the candidate wheels of the in-house packages and the third-party packages from PyPI, `pip check`, then the checks through the interface | Wheels built from the pins (`scripts/*_dependency.py prepare-pyodide`), static production build, checks through the interface only (`window.runtime` is not exposed) |
-| Release | `pip install DataLab-Capsule` from PyPI | `pip install datalab-platform` (or the installer) with published requirements only | `publishedRequirement` pins, `npm run release:guard`, `npm run build:release` |
+| Release | `pip install datalab-capsule` from PyPI | `pip install datalab-platform` (or the installer) with published requirements only | `publishedRequirement` pins, `npm run release:guard`, `npm run build:release` |
 
 A check passed in one context says nothing about another: the evidence of a delivery names the context it was obtained in. Development dependencies (sibling checkouts, `.env`, pytest for the evidence scripts) are never needed by a user of a release.
 
