@@ -1,3 +1,4 @@
 *.dlcapsule binary
 *.h5 binary
 *.json text eol=lf
+*.jsonld text eol=lf
