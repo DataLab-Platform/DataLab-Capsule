@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import socket
 import sys
@@ -13,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from datalab_capsule.archive import read_capsule
-from datalab_capsule.cli import main
+from datalab_capsule.archive import create_from_hdf5, read_capsule
+from datalab_capsule.cli import main, registry_main
 from datalab_capsule.manifest import manifest_fingerprint
 from datalab_capsule.review import validate_review
 
@@ -64,6 +65,36 @@ def test_create_without_h5py_says_what_to_install(
     assert main(["create", workspace, str(tmp_path / "x.dlcapsule")]) == 1
     assert "DataLab-Capsule[hdf5]" in capsys.readouterr().err
     assert not (tmp_path / "x.dlcapsule").exists()
+
+
+def test_registry_server_without_its_extra_says_what_to_install(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    """Without the registry extra, ``workspace-capsule-registry`` explains."""
+    real_find_spec = importlib.util.find_spec
+    monkeypatch.setattr(
+        importlib.util,
+        "find_spec",
+        lambda name, *args: None if name == "fastapi" else real_find_spec(name, *args),
+    )
+    assert registry_main([str(tmp_path / "registry")]) == 1
+    assert "DataLab-Capsule[registry]" in capsys.readouterr().err
+    assert not (tmp_path / "registry").exists()
+
+
+def test_unreadable_operator_inputs_are_errors(tmp_path: Path, capsys) -> None:
+    """A missing workspace file or an incomplete report is an error, not a crash."""
+    capsule = _capsule(tmp_path, "chain")
+    missing = str(tmp_path / "missing.h5")
+    assert main(["verify", str(capsule), "--workspace", missing]) == 1
+    assert "Unreadable document" in capsys.readouterr().err
+    report = tmp_path / "report.json"
+    report.write_text('{"activity_id": "a"}', encoding="utf-8")
+    review = ["review", str(capsule), str(tmp_path / "review.json")]
+    review += ["--reviewer", "A", "--statement", "Checked.", "--report", str(report)]
+    assert main(review) == 1
+    assert "activity_id and a verdict" in capsys.readouterr().err
+    assert not (tmp_path / "review.json").exists()
 
 
 @pytest.fixture(name="server")
@@ -124,6 +155,37 @@ def test_registry_round_trip(tmp_path: Path, server: str, capsys, monkeypatch) -
     missing = "sha256:" + "0" * 64
     assert main(["registry", "fetch", server, missing, str(tmp_path / "x")]) == 1
     assert "404" in capsys.readouterr().err
+
+
+def test_registry_fetch_never_writes_to_a_windows_device(
+    tmp_path: Path, server: str, capsys, monkeypatch
+) -> None:
+    """Attachments named like Windows devices are checked but not saved.
+
+    Writing to ``NUL`` would discard them, to ``CON`` print them; Windows also
+    drops a trailing dot. The other attachments are saved.
+    """
+    names = ("protocol.txt", "NUL", "con.txt", "Lpt1.log", "notes.")
+    capsule = tmp_path / "devices.dlcapsule"
+    capsule.write_bytes(
+        create_from_hdf5(
+            WORKSPACES / "desktop_chain.h5",
+            attachments=[
+                {"name": name, "data": b"x", "media_type": "text/plain"}
+                for name in names
+            ],
+        )
+    )
+    monkeypatch.setenv("REGISTRY_TOKEN", "secret")
+    publish = ["registry", "publish", server, str(capsule)]
+    assert main([*publish, "--token-env", "REGISTRY_TOKEN"]) == 0
+    fingerprint = manifest_fingerprint(read_capsule(capsule).manifest)
+    folder = tmp_path / "fetched"
+    capsys.readouterr()
+    assert main(["registry", "fetch", server, fingerprint, str(folder)]) == 1
+    out = capsys.readouterr().out
+    assert out.count("Windows does not accept this file name") == 4
+    assert [p.name for p in (folder / "attachments").iterdir()] == ["protocol.txt"]
 
 
 def test_registry_client_steps(tmp_path: Path, server: str) -> None:

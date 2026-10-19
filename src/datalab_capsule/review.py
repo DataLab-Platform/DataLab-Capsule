@@ -73,6 +73,12 @@ def create_review(
         ReviewError: If the review is invalid.
     """
     fingerprint = target if isinstance(target, str) else manifest_fingerprint(target)
+    try:
+        cited = [
+            {"activity_id": r["activity_id"], "verdict": r["verdict"]} for r in reports
+        ]
+    except (KeyError, TypeError) as exc:
+        raise ReviewError("Each report needs an activity_id and a verdict") from exc
     review = {
         "review": REVIEW_SCHEMA,
         "review_version": 1,
@@ -81,9 +87,7 @@ def create_review(
         "date": date or utc_timestamp(),
         "statement": statement,
         "verdict": verdict,
-        "reports": [
-            {"activity_id": r["activity_id"], "verdict": r["verdict"]} for r in reports
-        ],
+        "reports": cited,
     }
     review[_FINGERPRINT_KEY] = review_fingerprint(review)
     validate_review(review)

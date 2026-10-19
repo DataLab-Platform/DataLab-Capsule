@@ -73,6 +73,7 @@ ATTACHMENTS_DIR = "attachments/"
 ATTACHMENT_KEY = "dlc:attachment"
 _ATTACHMENT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 _HEX_DIGEST = re.compile(r"^[0-9a-f]{64}$")
+_SIZE = re.compile(r"0|[1-9][0-9]*")
 RO_CRATE = "https://w3id.org/ro/crate/1.3"
 RO_CRATE_CONTEXT = "https://w3id.org/ro/crate/1.3/context"
 PROCESS_RUN_CRATE = "https://w3id.org/ro/wfrun/process/0.6"
@@ -566,8 +567,16 @@ def validate_manifest(manifest: Any) -> None:
     except ManifestError as exc:
         problems.append(str(exc))
         workspace = {}
-    if workspace and not workspace.get("sha256"):
+    if workspace and not (
+        isinstance(workspace.get("sha256"), str)
+        and _HEX_DIGEST.fullmatch(workspace["sha256"])
+    ):
         problems.append("The workspace File must have a SHA-256")
+    if workspace and not (
+        isinstance(workspace.get("contentSize"), str)
+        and _SIZE.fullmatch(workspace["contentSize"])
+    ):
+        problems.append("The workspace File must have a size (contentSize)")
     if workspace and (workspace["@id"] == WORKSPACE_NAME) == bool(
         workspace.get(REFERENCED_KEY)
     ):
@@ -665,6 +674,7 @@ def validate_manifest(manifest: Any) -> None:
         # diff and verify rely on the summary of any valid manifest.
         try:
             inspect_manifest(manifest)
+            _environment_summary(manifest)
         except (AttributeError, IndexError, KeyError, TypeError, ValueError) as exc:
             problems.append(f"The manifest cannot be summarised: {exc!r}")
     if problems:
@@ -770,3 +780,37 @@ def inspect_manifest(manifest: Any) -> dict[str, Any]:
         "states": states,
         "fan_out": sorted(s["id"] for s in states if len(s["consumed_by"]) > 1),
     }
+
+
+def _environment_summary(
+    manifest: Any,
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    """Summarise the execution environments of a manifest (see ``diff``).
+
+    Returns:
+        ``(environments, activity_environments)``: each environment with its
+        packages resolved to versions, and the environment each activity of the
+        root ran in (one reference, a list of references, or None).
+    """
+    entities = _entities(manifest)
+    environments = {}
+    for entity in entities.values():
+        if entity.get("@type") != "dlc:Environment":
+            continue
+        packages = {}
+        for ref in _refs(entity.get("softwareRequirements")):
+            package = entities.get(ref, {})
+            packages[package.get("name")] = package.get("softwareVersion")
+        environments[entity["@id"]] = {
+            "edition": entity.get("dlc:edition"),
+            "edition_version": entity.get("dlc:editionVersion"),
+            "python": entity.get("dlc:python"),
+            "platform": entity.get("dlc:platform"),
+            "pyodide": entity.get("dlc:pyodide"),
+            "packages": packages,
+        }
+    activities = {}
+    for ref in _refs(entities["./"].get("mentions")):
+        used = _refs(entities[ref].get("dlc:environment"))
+        activities[ref] = {"environment": used[0] if len(used) == 1 else (used or None)}
+    return environments, activities

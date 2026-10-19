@@ -38,6 +38,8 @@ from datalab_capsule.review import ReviewError, validate_review
 
 __all__ = ["verify_capsule"]
 
+_ACTIVITY_PREFIX = "#activity-"
+
 
 def _workspace_checks(manifest: Mapping[str, Any], workspace: bytes) -> dict[str, Any]:
     """Check that the workspace ledger and stored states match the manifest.
@@ -142,10 +144,12 @@ def verify_capsule(
         result["states_located"] = checks.get("states_located")
         result["states_altered"] = checks.get("states_altered", [])
         result["problems"].extend(checks["problems"])
+    # Only the activities of the root: role bindings, parameters and artifacts
+    # also have "#activity-..." identifiers.
     activity_ids = {
-        key.split("#activity-", 1)[1]
-        for key in _entities(manifest)
-        if key.startswith("#activity-")
+        activity["id"][len(_ACTIVITY_PREFIX) :]
+        for activity in inspect_manifest(manifest)["activities"]
+        if activity["id"].startswith(_ACTIVITY_PREFIX)
     }
     for report in reports:
         status = "valid"

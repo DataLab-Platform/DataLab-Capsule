@@ -8,6 +8,7 @@ import copy
 import importlib.util
 import io
 import json
+import sys
 import zipfile
 from pathlib import Path
 
@@ -376,3 +377,82 @@ def test_verify_without_h5py(monkeypatch: pytest.MonkeyPatch) -> None:
     result = verify_capsule(capsule)
     assert result["valid"] and result["workspace"] == "integrity_only"
     assert result["states_located"] is None
+
+
+def test_reports_name_activities_not_their_parts() -> None:
+    """Role bindings, parameters and artifacts of an activity are not activities.
+
+    Their identifiers also start with ``#activity-``: a report or a review
+    naming one is refused like one naming an unknown activity.
+    """
+    data, ledger, _locators = _chain()
+    capsule = create_from_hdf5(data, date_published=DATE)
+    manifest = read_capsule(capsule).manifest
+    prefix = f"#activity-{ledger.activities[0]['activity_id']}"
+    parts = [
+        e["@id"][len("#activity-") :]
+        for e in manifest["@graph"]
+        if e["@id"].startswith(prefix + "-")
+    ]
+    assert parts
+    env = compare_environments(None, None, None, None)
+    reports = [
+        build_report(
+            activity_id=part,
+            restoration="replayable",
+            eligibility="ready",
+            inputs=[],
+            reference=None,
+            environment=env,
+        )
+        for part in parts
+    ]
+    review = create_review(
+        manifest, reviewer="A", statement="Checked.", reports=reports[:1]
+    )
+    result = verify_capsule(capsule, reports=reports, reviews=[review])
+    assert {r["status"] for r in result["reports"]} == {
+        "The report names an activity absent from the capsule"
+    }
+    assert result["reviews"][0]["status"] == (
+        "The review cites a report on an activity absent from the capsule"
+    )
+    assert not result["valid"]
+
+
+def test_parent_revision_alone_makes_capsules_differ(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """Capsules that differ only by their parent revision are not identical."""
+    data = CHAIN.read_bytes()
+    plain = tmp_path / "plain.dlcapsule"
+    child = tmp_path / "child.dlcapsule"
+    plain.write_bytes(create_from_hdf5(data, date_published=DATE))
+    child.write_bytes(
+        create_from_hdf5(data, date_published=DATE, revision_of="sha256:" + "1" * 64)
+    )
+    diff = diff_manifests(read_capsule(plain).manifest, read_capsule(child).manifest)
+    assert not diff["identical"] and diff["old"] != diff["new"]
+    assert diff["scientific_conclusion"] == "none"
+    groups = ("scientific", "presentation", "storage", "environment", "attachments")
+    assert not any(diff[group] for group in groups)
+    assert main(["diff", str(plain), str(child)]) == 1
+    assert "differ outside these groups" in capsys.readouterr().out
+
+
+def test_cli_output_is_utf8_whatever_the_stream(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Names are printed whatever the encoding of a redirected output."""
+    name = "Mesure \u0394T \u2192 \u03a9"
+    capsule = tmp_path / "named.dlcapsule"
+    capsule.write_bytes(
+        create_from_hdf5(CHAIN.read_bytes(), date_published=DATE, name=name)
+    )
+    for extra in ([], ["--json"]):
+        # As a pipe or a file on Windows
+        stream = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+        monkeypatch.setattr(sys, "stdout", stream)
+        assert main(["inspect", str(capsule), *extra]) == 0
+        stream.flush()
+        assert name in stream.buffer.getvalue().decode("utf-8")

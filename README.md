@@ -40,7 +40,7 @@ workspace-capsule inspect workspace.dlcapsule [--json]
 workspace-capsule diff old.dlcapsule new.dlcapsule [--json]
 ```
 
-`diff` exits with 0 when the capsules are identical and 1 when they differ.
+`diff` exits with 0 when the capsules are the same revision (same manifest fingerprint) and 1 when they differ.
 
 Writing one attachment to a new file (an existing file is never overwritten, and the attachment is never opened):
 
@@ -59,7 +59,7 @@ workspace-capsule registry publish URL workspace.dlcapsule [--review review.json
 workspace-capsule registry fetch URL FINGERPRINT FOLDER
 ```
 
-`diff` also compares manifest files (`.json`) fetched from a registry. The [two-operator scenario](doc/scenario.md) puts these commands together with DataLab Desktop and DataLab-Web.
+`diff` also compares manifest files (`.json`) fetched from a registry. `registry fetch` does not save an attachment whose name Windows reserves for a device (`NUL`, `CON`...). The [two-operator scenario](doc/scenario.md) puts these commands together with DataLab Desktop and DataLab-Web.
 
 Verifying a capsule reads the stored states with h5py; without h5py, it checks only the workspace SHA-256 and size and says so (`integrity_only`). A referenced workspace is checked only when its file is given; reports and reviews are optional:
 

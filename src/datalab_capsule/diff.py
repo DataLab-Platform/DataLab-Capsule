@@ -40,6 +40,7 @@ from typing import Any
 from datalab_capsule.manifest import (
     REVISION_KEY,
     _entities,
+    _environment_summary,
     inspect_manifest,
     manifest_fingerprint,
 )
@@ -96,37 +97,6 @@ def _compare(
                 )
 
 
-def _environments(manifest: Any) -> dict[str, dict[str, Any]]:
-    """Return the environments of a manifest, packages resolved to versions."""
-    entities = _entities(manifest)
-    result = {}
-    for entity in entities.values():
-        if entity.get("@type") != "dlc:Environment":
-            continue
-        packages = {}
-        for ref in entity.get("softwareRequirements") or []:
-            package = entities.get(ref.get("@id"), {})
-            packages[package.get("name")] = package.get("softwareVersion")
-        result[entity["@id"]] = {
-            "edition": entity.get("dlc:edition"),
-            "edition_version": entity.get("dlc:editionVersion"),
-            "python": entity.get("dlc:python"),
-            "platform": entity.get("dlc:platform"),
-            "pyodide": entity.get("dlc:pyodide"),
-            "packages": packages,
-        }
-    return result
-
-
-def _activity_environments(manifest: Any) -> dict[str, dict[str, Any]]:
-    """Return the environment each activity ran in."""
-    return {
-        key: {"environment": (entity.get("dlc:environment") or {}).get("@id")}
-        for key, entity in _entities(manifest).items()
-        if key.startswith("#activity-")
-    }
-
-
 def diff_manifests(old: Any, new: Any) -> dict[str, Any]:
     """Return the semantic difference between two capsule manifests.
 
@@ -138,8 +108,10 @@ def diff_manifests(old: Any, new: Any) -> dict[str, Any]:
         ``{"old", "new", "revision_of_old", "identical",
         "scientific_conclusion", "scientific", "presentation", "storage",
         "environment", "attachments"}``: the two manifest
-        fingerprints, whether *new* names *old* as its parent, whether nothing
-        differs, what can be concluded scientifically, and the changes of each
+        fingerprints, whether *new* names *old* as its parent, whether both
+        are the same revision (same fingerprint: manifests that differ only
+        outside the groups, e.g. by their parent revision, are not identical),
+        what can be concluded scientifically, and the changes of each
         group. A change is ``{"change":
         "added" | "removed" | "changed", "item", "id"}``, plus ``"field"``,
         ``"old"`` and ``"new"`` for a changed field.
@@ -183,18 +155,20 @@ def diff_manifests(old: Any, new: Any) -> dict[str, Any]:
         {a["name"]: a for a in new_summary["attachments"]},
         ("sha256", "size", "media_type", "description"),
     )
+    old_environments, old_activity_environments = _environment_summary(old)
+    new_environments, new_activity_environments = _environment_summary(new)
     _compare(
         environment,
         "environment",
-        _environments(old),
-        _environments(new),
+        old_environments,
+        new_environments,
         ("edition", "edition_version", "python", "platform", "pyodide", "packages"),
     )
     _compare(
         environment,
         "activity",
-        _activity_environments(old),
-        _activity_environments(new),
+        old_activity_environments,
+        new_activity_environments,
         ("environment",),
         False,
     )
@@ -210,12 +184,12 @@ def diff_manifests(old: Any, new: Any) -> dict[str, Any]:
         conclusion = "none"
     else:
         conclusion = "none_detected"
-    groups = (scientific, presentation, storage, environment, attachments)
     return {
         "old": old_fp,
         "new": new_fp,
         "revision_of_old": root.get(REVISION_KEY) == old_fp,
-        "identical": not any(groups),
+        # Some fields are not sorted into a group (e.g. the parent revision)
+        "identical": old_fp == new_fp,
         "scientific_conclusion": conclusion,
         "scientific": scientific,
         "presentation": presentation,

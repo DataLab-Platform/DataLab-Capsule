@@ -10,21 +10,31 @@ import json
 import zipfile
 
 import h5py
+import numpy as np
 import pytest
 
 from datalab_capsule.archive import CapsuleError, read_capsule
 from datalab_capsule.cli import main
+from datalab_capsule.diff import diff_manifests
 from datalab_capsule.hdf5 import ProvenanceFormatError, read_roi
-from datalab_capsule.integrity import MAX_JSON_DEPTH, check_json_depth, load_json
+from datalab_capsule.integrity import (
+    MAX_JSON_DEPTH,
+    check_json_depth,
+    load_json,
+    sha256_digest,
+)
 from datalab_capsule.manifest import (
     MANIFEST_NAME,
+    WORKSPACE_NAME,
     ManifestError,
+    build_manifest,
     manifest_fingerprint,
     validate_manifest,
 )
 from datalab_capsule.verify import verify_capsule
 
-from .test_diff_verify import _chain, _manifest
+from .test_capsule import DATE
+from .test_diff_verify import _chain, _manifest, _zip
 
 
 def _manifest_zip(text: str) -> bytes:
@@ -134,3 +144,82 @@ def test_damaged_entry_is_an_invalid_capsule() -> None:
     result = verify_capsule(bytes(data))
     assert not result["valid"]
     assert "Damaged entry" in result["problems"][0]
+
+
+def test_undecodable_entry_name_is_an_invalid_capsule(tmp_path, capsys) -> None:
+    """An entry name flagged UTF-8 that is not UTF-8 is refused, not a crash."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("\u00e9.txt", b"x")  # stored with the UTF-8 flag
+    data = buffer.getvalue().replace("\u00e9".encode(), b"\xff\xfe")
+    with pytest.raises(CapsuleError, match="Not a ZIP archive"):
+        read_capsule(data)
+    path = tmp_path / "name.dlcapsule"
+    path.write_bytes(data)
+    assert main(["validate", str(path)]) == 1
+    assert "Invalid capsule" in capsys.readouterr().err
+
+
+def test_workspace_without_size_is_invalid(tmp_path, capsys) -> None:
+    """The workspace File must declare its size, as attachments do."""
+    data, ledger, locators = _chain()
+    manifest = build_manifest(
+        ledger,
+        locators,
+        workspace_sha256=sha256_digest(data),
+        workspace_size=len(data),
+        date_published=DATE,
+    )
+    workspace = next(e for e in manifest["@graph"] if e["@id"] == WORKSPACE_NAME)
+    for size in (None, 12, "-1", "1e3", f"{len(data)}\n"):
+        hostile = copy.deepcopy(manifest)
+        entity = next(e for e in hostile["@graph"] if e["@id"] == workspace["@id"])
+        if size is None:
+            del entity["contentSize"]
+        else:
+            entity["contentSize"] = size
+        with pytest.raises(ManifestError, match="contentSize"):
+            validate_manifest(_refingerprinted(hostile))
+    del workspace["contentSize"]
+    path = tmp_path / "unsized.dlcapsule"
+    path.write_bytes(_zip(_refingerprinted(manifest), data))
+    assert main(["validate", str(path)]) == 1
+    assert main(["inspect", str(path)]) == 1
+    assert main(["verify", str(path)]) == 1
+    assert main(["workspace", str(path), str(tmp_path / "workspace.h5")]) == 1
+    assert "contentSize" in capsys.readouterr().err
+
+
+def test_malformed_workspace_block_is_not_verified() -> None:
+    """A provenance block that cannot be read makes the capsule not verified."""
+    data, ledger, locators = _chain()
+    buffer = io.BytesIO(data)
+    with h5py.File(buffer, "r+") as h5file:
+        h5file["DataLab_Provenance"].attrs["schema_version"] = np.array([1, 1])
+    hostile = buffer.getvalue()
+    manifest = build_manifest(
+        ledger,
+        locators,
+        workspace_sha256=sha256_digest(hostile),
+        workspace_size=len(hostile),
+        date_published=DATE,
+    )
+    result = verify_capsule(_zip(manifest, hostile))
+    assert not result["valid"] and result["workspace"] == "verified"
+    assert result["problems"][0].startswith("Invalid workspace")
+
+
+def test_single_references_are_compared() -> None:
+    """A single reference (valid JSON-LD) is read like a list of one, not a crash."""
+    _data, ledger, locators = _chain()
+    manifest = _manifest(ledger, locators)
+    hostile = copy.deepcopy(manifest)
+    environment = next(
+        e for e in hostile["@graph"] if e.get("@type") == "dlc:Environment"
+    )
+    [package] = environment["softwareRequirements"][:1]
+    environment["softwareRequirements"] = package
+    validate_manifest(_refingerprinted(hostile))
+    diff = diff_manifests(manifest, hostile)
+    assert diff["scientific"] == [] and not diff["identical"]
+    assert [c["field"] for c in diff["environment"]] == ["packages"]

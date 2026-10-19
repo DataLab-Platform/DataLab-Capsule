@@ -76,7 +76,7 @@ EXTRAS = {
 }
 ENTRY_POINTS = (
     "workspace-capsule = datalab_capsule.cli:main",
-    "workspace-capsule-registry = datalab_capsule.registry_app:main",
+    "workspace-capsule-registry = datalab_capsule.cli:registry_main",
 )
 
 

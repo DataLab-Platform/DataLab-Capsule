@@ -29,12 +29,16 @@ the network, at the address given; everything they fetch is checked. A
 referenced workspace is checked only when its file is given with
 ``--workspace``. ``attachment`` writes one checked attachment to OUTPUT and
 ``workspace`` the checked workspace (to open in DataLab); no
-command overwrites a file or opens an attachment. ``create`` needs h5py.
+command overwrites a file or opens an attachment. ``registry fetch`` does not
+save an attachment whose name Windows reserves (``NUL``, ``CON``...). ``create``
+needs h5py.
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib.util
+import io
 import json
 import mimetypes
 import os
@@ -55,7 +59,7 @@ from datalab_capsule.registry_client import RegistryClient, fetch_revision
 from datalab_capsule.review import VERDICTS, create_review
 from datalab_capsule.verify import verify_capsule
 
-__all__ = ["main"]
+__all__ = ["main", "registry_main"]
 
 
 def _short(ref: str | None) -> str:
@@ -139,6 +143,8 @@ def _print_diff(diff: dict) -> None:
             if "field" in change:
                 line += f" {change['field']}: {change['old']!r} -> {change['new']!r}"
             print(line)
+    if not any(diff[group] for group in groups):
+        print("The manifests differ outside these groups (e.g. the parent revision).")
 
 
 def _print_verification(result: dict) -> None:
@@ -164,6 +170,9 @@ def _load_json(path: str) -> object:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command line and return its exit code."""
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        # Names and units may hold any character, whatever the console or pipe
+        sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
     parser = argparse.ArgumentParser(
         prog="workspace-capsule",
         description="Validate, inspect, compare and verify DataLab workspace capsules.",
@@ -299,10 +308,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _verify(args: argparse.Namespace) -> int:
     resolver = None
-    if args.workspace:
-        workspace = Path(args.workspace).read_bytes()
-        resolver = lambda _iri: workspace  # noqa: E731
     try:
+        if args.workspace:
+            workspace = Path(args.workspace).read_bytes()
+            resolver = lambda _iri: workspace  # noqa: E731
         reports = [_load_json(path) for path in args.report]
         reviews = [_load_json(path) for path in args.review]
     except (OSError, ValueError) as exc:
@@ -331,6 +340,24 @@ def _write_new(path: Path, data: bytes) -> None:
     """Write *data* to a new file; never overwrite."""
     with open(path, "xb") as file:
         file.write(data)
+
+
+#: Device names Windows resolves in any folder and with any extension.
+_WINDOWS_DEVICES = frozenset(
+    ["CON", "PRN", "AUX", "NUL"]
+    + [f"{port}{digit}" for port in ("COM", "LPT") for digit in range(10)]
+)
+
+
+def _portable_file_name(name: str) -> bool:
+    """Return False for a name Windows would not create as that regular file.
+
+    Writing to a device name would discard the data (``NUL``) or print it
+    (``CON``); Windows also drops a trailing dot.
+    """
+    return name.split(".", 1)[0].upper() not in _WINDOWS_DEVICES and not name.endswith(
+        "."
+    )
 
 
 def _create(args: argparse.Namespace) -> int:
@@ -436,10 +463,33 @@ def _registry(args: argparse.Namespace) -> int:
             problems += 1
             print(f"Attachment {entry['name']}: {entry['status']}")
             continue
+        if not _portable_file_name(entry["name"]):
+            problems += 1
+            print(
+                f"Attachment {entry['name']}: checked, not saved "
+                "(Windows does not accept this file name)"
+            )
+            continue
         (folder / "attachments").mkdir(exist_ok=True)
         _write_new(folder / "attachments" / entry["name"], entry["data"])
         print(f"Attachment {entry['name']}: checked, saved (not opened)")
     return 0 if problems == 0 else 1
+
+
+def registry_main(argv: Sequence[str] | None = None) -> int:
+    """Run the ``workspace-capsule-registry`` server, if its extra is installed."""
+    if any(importlib.util.find_spec(name) is None for name in ("fastapi", "uvicorn")):
+        print(
+            "The registry needs FastAPI and uvicorn: "
+            'pip install "DataLab-Capsule[registry]"',
+            file=sys.stderr,
+        )
+        return 1
+    from datalab_capsule.registry_app import (  # pylint: disable=import-outside-toplevel
+        main as serve,
+    )
+
+    return serve(argv)
 
 
 if __name__ == "__main__":
