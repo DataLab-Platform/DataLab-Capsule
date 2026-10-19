@@ -75,9 +75,10 @@ def utc_timestamp() -> str:
 
 def _state_order(states: Mapping[str, Any]) -> list[str]:
     """Return state identifiers ordered by sequence, then insertion order."""
-    keys = list(states)
+    position = {key: index for index, key in enumerate(states)}
     return sorted(
-        keys, key=lambda k: (states[k].get("sequence", keys.index(k)), keys.index(k))
+        position,
+        key=lambda k: (states[k].get("sequence", position[k]), position[k]),
     )
 
 
