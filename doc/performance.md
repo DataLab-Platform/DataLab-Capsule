@@ -149,7 +149,22 @@ Representative profile, worker (UI thread as a diagnostic), chain of 4 images 20
 | DataLab Desktop | The library limits; files are checked before being read | 32 MiB in the interface, 234 MiB through the library; 1000 activities | Tested in the interface up to 32 MiB (unavailable less than 0.2 s); the wait grows with the size of the capsule, roughly in proportion through the library (not measured in the interface beyond 32 MiB). Tested up to 1000 objects per panel (each processing then takes about 0.26 s, against 80 ms in an empty panel) |
 | DataLab-Web | Archive and workspace 256 MiB, manifest 16 MiB | 233 MiB (heap 1.5 GiB in a session) | Up to about 130 MiB per capsule for an interactive use (operations of 1 to 3.5 s); up to the 256 MiB limit with patience (5.7 s to inspect 233 MiB) and a browser that can give the page about 2 GiB |
 
-The ledger is not limited by a configured size: 1000 activities stay usable in both editions (verification of their capsule 1.7 s in CPython, 8 s in Pyodide under Node).
+There is no fixed maximum activity count, but the ledger is not unbounded: JSON volume limits and structural protections still apply. The measured 1000 activities stay usable in both editions (verification of their capsule 1.7 s in CPython, 8 s in Pyodide under Node); this is not a promise for arbitrary ledgers.
+
+### Technical bounds
+
+| Resource | Current bound and source |
+| --- | --- |
+| Library/Desktop archive | `MAX_ARCHIVE_BYTES`: 4 GiB workspace + 64 MiB manifest + 8 × 16 MiB attachments + 1 MiB ZIP headers; distinct from the workspace limit (`archive.py`) |
+| Archive structure | At most 16 entries in prescribed locations, stored without ZIP compression; internal HDF5 compression is a separate matter (`archive.py`) |
+| Stored-state fingerprint reads | At most 2 GiB per signal or image (`hdf5.py`); not a guaranteed practical working size |
+| HDF5 JSON texts | At most 64 MiB each; JSON nesting depth 64; ROI definitions limited to 10 000 nodes read (`hdf5.py`, `integrity.py`) |
+| Per-result projection | 200 input entries per activity, 50 analyses and 20 states per object, expansion depth 64 (`inspection.py`); truncation does not delete records |
+| Edition summaries | 120 characters and up to 8 collection items; the record can contain more than the displayed text |
+| Local revisions | 100 manifests per edition (`capsulestore.py`, `capsuleRevisions.ts`), not a backup of capsule files |
+| Reference registry | Manifest 8 MiB, review 1 MiB, attachment 16 MiB, at most 1000 revisions in a listing (`registry.py`) |
+
+The Web archive and workspace each remain limited to 256 MiB, and its manifest to 16 MiB. Policies differ: acceptance by one edition does not imply acceptance by another. Creation can retain several representations of the archive and HDF5; none of these bounds is a universal memory multiplier.
 
 These ranges are those of one computer. They are neither guarantees nor limits enforced by the editions: the configured limits stay as they are, and no edition aligns its limits on the other one.
 

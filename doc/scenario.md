@@ -25,7 +25,7 @@ The `workspace-capsule` command line is an independent tool for the same checks,
 
 ### 1. Operator A: process and save (DataLab Desktop)
 
-Process signals in DataLab and save the workspace (_File > Save to HDF5 file…_), for example `chain.h5`. Each processing is recorded with its parameters, inputs, outputs and environment.
+Process signals through DataLab's supported processors and save the workspace (_File > Save to HDF5 file…_), for example `chain.h5`. These executions are recorded with their parameters, inputs, outputs and environment. Keep the useful source objects and reference results: the record describes earlier states but does not archive every old array. Copying the final result alone to a new workspace does not reconstruct a verifiable analysis.
 
 ### 2. Operator A: create the capsule
 
@@ -40,6 +40,8 @@ workspace-capsule inspect chain.dlcapsule
 
 The capsule holds the workspace, its manifest and the attachment, declared with its size and SHA-256. Send `chain.dlcapsule` to operator B (mail, shared folder…).
 
+Review data, metadata, titles, trial records and attachments before sending: there is no automatic minimal export or anonymization, and deleting an object does not remove its recorded traces. Acquisition files and external resources are not attached automatically. For a referenced capsule, deliver the matching HDF5 separately; neither its address nor the registry downloads it for the recipient.
+
 ### 3. Operator B: inspect, replay, continue, review (DataLab-Web)
 
 In _File > Workspace capsule…_:
@@ -50,6 +52,8 @@ In _File > Workspace capsule…_:
 4. _Inspect_ the child, write a review (reviewer, statement, verdict), _Cite a report…_, _Save the review…_.
 
 Send the child capsule, the review and the report to operator A.
+
+The proposed parent is the capsule whose workspace B opened, including after a save/reopen of its HDF5. Exporting a child does not move that origin: open A, export B, then export again still proposes A. Inspecting another capsule does not change the current workspace's parent. Attach the parent's files again deliberately; adding another workspace does not merge provenance or replace the parent.
 
 ### 4. Operator A: check and compare
 

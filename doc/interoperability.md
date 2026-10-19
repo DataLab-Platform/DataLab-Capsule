@@ -71,9 +71,30 @@ Costs and capacity of these paths are measured in the [performance notes](perfor
 
 ## Limits
 
+### Capture paths
+
+The qualified-operation count describes contracts, not every GUI/API path. The following scope is checked against the Desktop processors and History replay, and the Web bootstrap and macro proxy:
+
+| Family | Captured execution or limit |
+| --- | --- |
+| Ordinary/grouped 1-to-1, 2-to-1, n-to-1 and 1-to-n processing | Processor paths record the input states and committed outputs; known contracts identify the calls, otherwise they can remain opaque |
+| Analyses, including a successful detection with no result | Artifact outputs or explicit absence of a result are recorded; detection-created ROI do not invalidate an otherwise unchanged input |
+| Signal/image conversions and ROI extraction | Recorded through the processing paths, including cross-panel outputs |
+| Processing/Recompute and replay of supported History compute actions | New executions are recorded; local verification alone does not insert or record a result |
+| Import, creation, direct data/ROI/metadata edits | Not scientific calls describing acquisition or arbitrary mutations; states may be observed without known production when later used as inputs or explicitly observed |
+| Interactive Desktop fitting and markers-table-to-signal | Not currently recorded scientific calls, even where the History keeps an editable action |
+| Plugins, macros, notebooks, scripts and remote APIs | Supported processor calls are captured; direct object access can bypass them and functions without contracts can remain opaque |
+| Failed/cancelled processing or discarded preview | Not successful executions; an adopted preview is recorded when its result is committed |
+
+These are capture boundaries, not a ban on replay of every plugin or a claim that every script is traced. The Desktop History Record switch does not control provenance. A capture failure is logged and counted without aborting the scientific result; see the [common rules](rules.md#workspace-and-capture-boundaries).
+
+### Replay and exchange
+
 - The phase spectrum (signal and image) is identified but not qualified for replay. Tolerances are measured on the calls of the Sigima validation tests, in the three environments above.
 - Metadata read by a computation are outside state fingerprints. They are checked only when the operation contract declares them (`reads_metadata`, e.g. the fit parameters used by `evaluate_fit`): their digest is recorded in the activity context and a change refuses the replay (`input_changed`). Interactive Desktop fits are not recorded.
 - The registry has no accounts, quotas, rate limits or delete API; one token protects publishing. It must be deployed behind HTTPS and a reverse proxy (see the security analysis).
 - Fingerprints prove integrity, not authorship: reviews name their author without proving it.
 - Measured sizes (see [performance](performance.md)): DataLab-Web was tested up to a 233 MiB capsule (limit 256 MiB), DataLab Desktop up to 32 MiB through its dialog and the library up to 234 MiB; a ledger of 1000 activities stays usable in both editions. DataLab-Web needs network access to start (no offline mode).
 - Tested on Windows (Desktop) and Chromium (Web); the library CI also runs on Linux.
+- Numerical arrays of earlier states are not all retained. ROI-only restoration on copies requires unchanged input data, and never repairs missing or altered output references.
+- Environment descriptions are not installers. Physical acquisition, conversions before native objects, and arbitrary external dependencies are not automatically reconstructed. RO-Crate/PROV compatibility is not a guarantee that every third-party reader restores or replays DataLab; profile 0.1 remains experimental.

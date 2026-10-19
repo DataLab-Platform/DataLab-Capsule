@@ -48,6 +48,40 @@ Stored results follow the state rules above: a located, unaltered state can be r
 - `exact` (the default): same rows, dtype and shape, equal values, NaN at the same positions (for complex values, in both parts);
 - a tolerance, declared with its justification for computations whose last bits depend on the numerical libraries (Fourier transforms, recursive filters, fits, reductions): values within `atol + rtol * |reference|` give `within_tolerance`, with the observed errors; the rule states whether results must still be identical within an identical environment, which is then applied exactly.
 
-Signals and images are compared on their rows, regions of interest and units; analysis results (tables, geometries) on their values under the rule and on their structure (kinds, column names, ROI indices) exactly; an optional output recorded without result (e.g. a detection that found nothing) must have no result again. A missing, altered or replaced reference gives `not_verified` for that output; the verdict of the report is the most severe verdict of its outputs. A rule is never widened to hide a difference: `different` is reported. With Sigima 1.3, 213 of the 215 operations of the catalogue are qualified (161 exact, 52 with a tolerance measured across CPython and Pyodide); the phase spectrum (signal and image) is identified but not qualified, and its replay is refused with `unsupported_contract`.
+Signals and images are compared on their rows, regions of interest and units; analysis results (tables, geometries) on their values under the rule and on their structure (kinds, column names, ROI indices) exactly; an optional output recorded without result (e.g. a detection that found nothing) must have no result again. A missing, altered or replaced reference gives `not_verified` for that output; the verdict of the report is the most severe verdict of its outputs. A rule is never widened to hide a difference: `different` is reported. The phase spectrum (signal and image) is identified but not qualified, and its replay is refused with `unsupported_contract`; dated qualification counts and environments belong in the [interoperability report](interoperability.md).
 
 `verify_capsule` and the `verify` command never compute: they check integrity (manifest, workspace, stored states) and the consistency of supplied reports and reviews. Recomputation is a feature of the editions.
+
+Without h5py, workspace checking covers SHA-256 and size only (`integrity_only`), not individual HDF5 states. A referenced workspace that was not supplied is `not_available`; its address is not fetched automatically. A supplied report remains its author's assertion even when its structure and target are valid.
+
+## Workspace and capture boundaries
+
+A capsule describes the workspace exported by its author, its ledger and chosen attachments. It does not select the minimal analysis for a result or collect every external resource, source CSV/TIFF file, instrument or acquisition step. Copying a result alone into another workspace does not reconstruct its necessary inputs. A smaller verifiable exchange requires deliberately preserving or rebuilding useful inputs and checking the remaining references, not manually editing the ledger.
+
+The ledger keeps descriptions, fingerprints and dependencies, not snapshots of every earlier array or analysis value. Removing an object does not remove earlier activities. A later analysis under the same metadata key can leave an earlier artifact `replaced`. ROI-only input restoration is limited to copies with unchanged numerical data; it neither reconstructs missing arrays nor makes an absent, changed or replaced output a valid reference.
+
+Appending workspace data does not merge ledgers or change the current capsule parent. Objects taking over an earlier UUID get an identity break: states before that break belong to another object, including analysis references. Replacing a workspace restores its ledger and origin. Generic HDF5 browsing imports datasets, not the scientific production of a native workspace.
+
+Automatic capture applies to the [supported paths](interoperability.md#capture-paths), independently of the Desktop History Record mode. The History is an editable recipe, not the append-only execution record. Direct object creation/edits can bypass capture, and calls without an operation contract can remain opaque. A recording failure does not abort scientific processing: `Recorder.capture_failures` counts it and the `datalab_capsule.recorder` logger reports it. The result can therefore exist without an activity; no user-interface completeness indicator is implied.
+
+Cancelled/failed processing and discarded previews are not successful executions. A detection that succeeds without a result is recorded and compared as such. Legacy records have unknown input states and possibly partial parameters/environments; their names never acquire executable meaning retroactively.
+
+## Verification and revision boundaries
+
+An explicit local replay verifies one activity on copies. It does not rebuild a whole chain, recover all historical states or implement a workflow for new data. Reapplying a processing to current inputs is a new execution. Environment differences are reported, not automatically installed or repaired; successful exact/tolerant comparison is neither universal reproducibility, scientific validity nor authenticated authorship.
+
+Only dependencies declared by the contract are captured and reapplied. State fingerprints exclude arbitrary metadata; metadata read by an operation are checked through their recorded digests. For example, altered fit parameters used by `evaluate_fit` may give `input_changed` while the signal arrays still match. A missing declaration cannot be inferred from the archive.
+
+`none_detected` compares the recorded activities and states, not every unrecorded aspect of an analysis. HDF5 storage bytes, publication dates or presentation can change capsule identity without a new scientific calculation. Attachments are compared as declared bytes in their own group, without scientific interpretation: a changed protocol can matter even when no scientific difference is detected.
+
+Revisions are immutable, with one direct parent at most. The editions propose the capsule whose workspace was opened as parent, also after saving/reopening HDF5: opening A and exporting B does not move the next proposed parent from A to B. Inspection alone does not change that origin. There is no automatic merge, concurrent collaboration, conflict resolver or complete review approval process. Local revision lists keep at most 100 manifests each, not the capsule files; browser storage deletion removes the Web list.
+
+The workspace licence is independent of the software licence. The manifest contains the supplied declaration, or the neutral default "No licence was specified for this workspace." No BSD licence is assigned to data by default.
+
+## Bounded views and resources
+
+Consultation reads the ledger without arrays or calculations. Web disk-mode data checks can report nonresident arrays without loading them; explicit replay can load its required objects, except opaque calls which are refused before data access.
+
+The per-result projection limits input entries to 200 per activity, analyses to 50 and states to 20 per object, with expansion depth 64. Its `*_truncated` fields and `depth_limit` report omitted view content, not removed ledger records. Edition formatters abbreviate values to 120 characters and collections to 8 items; consult the record for details.
+
+JSON volume and structural limits also bound the ledger even without a fixed maximum activity count. [Resource policies and measurements](performance.md) distinguish accepted size from tested capacity. [Trust and privacy limits](security.md) apply to all exchanges: profile 0.1 is experimental, not a universal sandbox or a promise that any RO-Crate/PROV reader can restore DataLab.
