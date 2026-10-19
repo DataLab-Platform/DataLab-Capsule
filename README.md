@@ -2,7 +2,7 @@
 
 Exchange and verify scientific workspace provenance as open RO-Crate capsules (library and CLI, no DataLab required).
 
-Status: experimental, under development. Nothing is published yet.
+Status: experimental. Version 0.1.0 is the first public release, on PyPI as `DataLab-Capsule`; it implements the experimental [DataLab capsule profile 0.1](https://datalab-platform.com/capsule/0.1), which may still change.
 
 ## Scope
 
@@ -26,7 +26,7 @@ Users of DataLab Desktop and DataLab-Web need nothing more than their edition: b
 
 The package itself is installed in one of three ways, which must not be mixed up:
 
-- **Released version**, for users of the command line and third-party readers: `pip install DataLab-Capsule`, with the `hdf5` extra to create capsules or check stored states and the `registry` extra to run a registry. Not available yet (see the status above).
+- **Released version**, for users of the command line and third-party readers: `pip install DataLab-Capsule`, with the `hdf5` extra to create capsules or check stored states and the `registry` extra to run a registry.
 - **Candidate qualification**, before a release: a wheel and an sdist built from the commit to qualify (`python -m build`), checked with `scripts/check_dist.py` and `scripts/check_profile.py`, then installed in a clean environment, outside the checkout.
 - **Development**: editable install of this checkout, used by the sibling checkouts of DataLab and DataLab-Web (see [developer notes](doc/development.md)).
 
@@ -120,7 +120,7 @@ Golden vectors and the test suite in Pyodide (Node 22):
 .\.venv\Scripts\python.exe -m pip wheel . --no-deps -w dist
 cd tests\pyodide
 npm install
-node run_pyodide.mjs ..\..\dist\datalab_capsule-0.1.0.dev0-py3-none-any.whl
+node run_pyodide.mjs (Resolve-Path ..\..\dist\datalab_capsule-*.whl)
 ```
 
 Cost of fingerprints and of capsules (time and memory), in CPython and in Pyodide (see [performance](doc/performance.md)):
@@ -130,7 +130,7 @@ Cost of fingerprints and of capsules (time and memory), in CPython and in Pyodid
 .\.venv\Scripts\python.exe benchmarks\fingerprint_cost.py --profile quick --output build\bench\fingerprints.json
 .\.venv\Scripts\python.exe benchmarks\capsule_cost.py --profile representative --output build\bench\capsules.json
 cd tests\pyodide
-node run_benchmark.mjs ..\..\dist\datalab_capsule-0.1.0.dev0-py3-none-any.whl capsule_cost.py --profile quick --output ..\..\build\bench\capsules-pyodide.json
+node run_benchmark.mjs (Resolve-Path ..\..\dist\datalab_capsule-*.whl) capsule_cost.py --profile quick --output ..\..\build\bench\capsules-pyodide.json
 ```
 
 ## License

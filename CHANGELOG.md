@@ -2,9 +2,9 @@
 
 All notable changes to DataLab-Capsule are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The capsule format itself is versioned by its profile (<https://datalab-platform.com/capsule/0.1>).
 
-## [Unreleased]
+## [0.1.0] - 2026-10-19
 
-First public release (0.1.0), shared by DataLab Desktop and DataLab-Web.
+First public release, shared by DataLab Desktop and DataLab-Web.
 
 ### Added
 

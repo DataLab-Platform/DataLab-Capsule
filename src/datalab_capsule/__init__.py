@@ -7,4 +7,4 @@ the standard library and ``jsonschema``; HDF5 helpers import NumPy and h5py
 lazily.
 """
 
-__version__ = "0.1.0.dev0"
+__version__ = "0.1.0"
