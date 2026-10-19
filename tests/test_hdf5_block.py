@@ -293,6 +293,62 @@ def test_roi_added_in_file_is_altered() -> None:
         assert load_ledger(h5file)[1] == {state_id: "altered"}
 
 
+def _array_schema_version(h5file) -> None:
+    h5file[BLOCK_GROUP].attrs["schema_version"] = np.array([1, 1])
+
+
+def _array_uniform_flag(h5file) -> None:
+    h5file[IMAGE_PATH].attrs["is_uniform_coords"] = np.array([True, False])
+
+
+def _array_roi_length(h5file) -> None:
+    h5file[f"{IMAGE_PATH}/metadata/_roi_/single_rois"].attrs["__seq"] = [1, 1]
+
+
+def _roi_text_not_utf8(h5file) -> None:
+    roi = h5file[f"{IMAGE_PATH}/metadata/_roi_/single_rois/__seq0"]
+    roi.attrs["title"] = np.bytes_(b"\xff")
+
+
+def _scalar_roi_of_array_type(h5file) -> None:
+    # 128 MiB once read, though the file stores nothing
+    metadata = h5file[f"{IMAGE_PATH}/metadata"]
+    del metadata["_roi_"]
+    metadata.create_dataset("_roi_", shape=(), dtype=np.dtype(("f8", (4096, 4096))))
+
+
+def _scalar_ledger_of_array_type(h5file) -> None:
+    del h5file[BLOCK_GROUP]["ledger_json"]
+    h5file[BLOCK_GROUP].create_dataset(
+        "ledger_json", shape=(), dtype=np.dtype(("f8", (4096, 4096)))
+    )
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        (_array_schema_version, "schema_version"),
+        (_array_uniform_flag, "Not a scalar attribute"),
+        (_array_roi_length, "Not a scalar attribute"),
+        (_roi_text_not_utf8, "Invalid ROI"),
+        (_scalar_roi_of_array_type, "too large"),
+        (_scalar_ledger_of_array_type, "Not a scalar string dataset"),
+    ],
+)
+def test_malformed_block_or_object_is_refused(change, message: str) -> None:
+    """Malformed provenance or objects are refused, never crashed on.
+
+    Arrays where scalars are expected, undecodable text, and datasets whose
+    type alone is large (never read).
+    """
+    roi = ROI([0.0, 0.0, 2.0, 2.0], kind="RectangularROI")
+    with _memory_file() as h5file:
+        _saved_image_with_roi(h5file, roi)
+        change(h5file)
+        with pytest.raises(ProvenanceFormatError, match=message):
+            load_ledger(h5file)
+
+
 def _set_attr(name: str, value):
     def change(h5file) -> None:
         h5file[IMAGE_PATH].attrs[name] = value

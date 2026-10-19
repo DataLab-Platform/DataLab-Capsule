@@ -21,6 +21,7 @@ virtual datasets are refused; sizes are checked before reading.
 from __future__ import annotations
 
 import json
+import numbers
 import re
 from collections.abc import Mapping
 from typing import Any
@@ -101,9 +102,19 @@ def _check_link(group: Any, name: str) -> None:
 def _check_dataset(dataset: Any, max_bytes: int) -> None:
     if dataset.is_virtual:
         raise ProvenanceFormatError(f"Virtual dataset refused: {dataset.name}")
-    size = dataset.size * dataset.dtype.itemsize if dataset.shape else 0
+    # A scalar has size 1 (its type may be a large array); a null dataspace None
+    size = (dataset.size or 0) * dataset.dtype.itemsize
     if size > max_bytes or dataset.id.get_storage_size() > max_bytes:
         raise ProvenanceFormatError(f"Dataset too large: {dataset.name}")
+
+
+def _scalar_attr(node: Any, name: str, default: Any = None) -> Any:
+    """Return the attribute *name* of *node*, refusing an array."""
+    value = node.attrs.get(name, default)
+    # NumPy values have ndim (0 for a scalar); Python values have none
+    if getattr(value, "ndim", 0) != 0:
+        raise ProvenanceFormatError(f"Not a scalar attribute: {node.name}@{name}")
+    return value
 
 
 def _read_text(group: Any, name: str) -> str:
@@ -112,10 +123,13 @@ def _read_text(group: Any, name: str) -> str:
         raise ProvenanceFormatError(f"Missing dataset: {group.name}/{name}")
     _check_link(group, name)
     dataset = group[name]
-    if not isinstance(dataset, h5py.Dataset) or dataset.shape != ():
+    if (
+        not isinstance(dataset, h5py.Dataset)
+        or dataset.shape != ()
+        or h5py.check_string_dtype(dataset.dtype) is None
+    ):
         raise ProvenanceFormatError(f"Not a scalar string dataset: {dataset.name}")
-    if dataset.id.get_storage_size() > MAX_JSON_BYTES:
-        raise ProvenanceFormatError(f"Dataset too large: {dataset.name}")
+    _check_dataset(dataset, MAX_JSON_BYTES)
     value = dataset[()]
     # The storage size of a variable-length string only counts its pointer.
     size = len(value) if isinstance(value, bytes) else len(str(value).encode())
@@ -220,7 +234,8 @@ def read_block(h5file: Any) -> tuple[Ledger, dict[str, dict[str, str]]] | None:
     group = h5file[BLOCK_GROUP]
     if not isinstance(group, h5py.Group):
         raise ProvenanceFormatError(f"{BLOCK_GROUP} must be a group")
-    if group.attrs.get("schema_version") != BLOCK_SCHEMA_VERSION:
+    version = group.attrs.get("schema_version")
+    if not isinstance(version, numbers.Integral) or version != BLOCK_SCHEMA_VERSION:
         raise ProvenanceFormatError("Unsupported provenance block schema_version")
     try:
         ledger = Ledger.from_json(_read_text(group, "ledger_json"))
@@ -285,6 +300,8 @@ def scan_object_index(h5file: Any) -> dict[str, dict[str, str]]:
         if root not in h5file:
             continue
         _check_link(h5file, root)
+        if not isinstance(h5file[root], h5py.Group):
+            raise ProvenanceFormatError(f"{root} must be a group")
         for group_name in h5file[root]:
             _check_link(h5file[root], group_name)
             group = h5file[root][group_name]
@@ -451,7 +468,7 @@ def read_image(h5file: Any, path: str) -> dict[str, Any]:
         "yunit": _text_attr(node, "yunit"),
         "zunit": _text_attr(node, "zunit"),
     }
-    if bool(node.attrs.get("is_uniform_coords", True)):
+    if bool(_scalar_attr(node, "is_uniform_coords", True)):
         for name, default in (("x0", 0.0), ("y0", 0.0), ("dx", 1.0), ("dy", 1.0)):
             try:
                 result[name] = float(node.attrs.get(name, default))
@@ -484,7 +501,7 @@ def _decode_metadata(node: Any, budget: list[int], depth: int = 1) -> Any:
         return node[()]
     if "__seq" in node.attrs:
         items = []
-        for index in range(int(node.attrs["__seq"])):
+        for index in range(int(_scalar_attr(node, "__seq"))):
             name = f"__seq{index}"
             if name in node:
                 _check_link(node, name)
@@ -519,7 +536,13 @@ def read_roi(h5file: Any, path: str) -> Any:
     if ROI_METADATA_KEY not in metadata:
         return None
     _check_link(metadata, ROI_METADATA_KEY)
-    return _decode_metadata(metadata[ROI_METADATA_KEY], [MAX_ROI_NODES])
+    try:
+        return _decode_metadata(metadata[ROI_METADATA_KEY], [MAX_ROI_NODES])
+    except (TypeError, ValueError, OverflowError) as exc:
+        if isinstance(exc, ProvenanceError):
+            raise
+        # e.g. a sequence length that is not a number
+        raise ProvenanceFormatError(f"Invalid ROI of {path}: {exc}") from exc
 
 
 def locate_fingerprints(
@@ -597,11 +620,18 @@ def _altered_states(
     for state_id, locator in locators.items():
         state = ledger.states[state_id]
         roi = read_roi(h5file, locator["path"])
+        try:
+            roi_digest = None if roi is None else value_digest(roi)
+        except (TypeError, ValueError) as exc:
+            # e.g. text that is not UTF-8, or a value JSON cannot represent
+            raise ProvenanceFormatError(
+                f"Invalid ROI of {locator['path']}: {exc}"
+            ) from exc
         recorded_roi = (state.get("roi") or {}).get("digest")
         if (
             state["fingerprint"] is None
             or fingerprints[state_id] != state["fingerprint"]["value"]
-            or (None if roi is None else value_digest(roi)) != recorded_roi
+            or roi_digest != recorded_roi
         ):
             altered.add(state_id)
     return altered
