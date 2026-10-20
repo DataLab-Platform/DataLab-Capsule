@@ -59,7 +59,7 @@ Campaign of 17 October 2026, on one laptop:
 
 - Windows 11 (build 26200), Intel Core i5-1335U (10 cores, 12 threads), 32 GiB of RAM;
 - CPython 3.12.10 for DataLab-Capsule and 3.11.6 for DataLab Desktop (Qt 5.15.2, computations in a separate process as by default), Pyodide 0.26.4 (Python 3.12.1) under Node 22.23.2, Chromium 153 driven by Playwright;
-- branch `feature/workspace-provenance`: DataLab-Capsule `dbbb2aa` (with the verification fix below), DataLab `74cca869`, DataLab-Web `625aa89`, Sigima `7421aa5`.
+- development commits shortly before the releases (branch `feature/workspace-provenance`, since merged into `develop` and released as DataLab-Capsule 0.1.0, Sigima 1.3.0 and DataLab-Web 0.10.0): DataLab-Capsule `57989f3` (with the verification fix below), DataLab `30fa1d01`, DataLab-Web `56b5f96`, Sigima `9edf2c3`.
 
 Profiles run: `quick` on every launcher, `representative` on CPython, Pyodide under Node, DataLab Desktop and DataLab-Web (worker, RAM and disk), the main thread of DataLab-Web as a diagnostic, and the `capacity` profile of DataLab-Web; `stress` was only run on three cases in CPython, to check the launcher. Durations are medians of 5 runs after a warm-up (3 for the browser), on a laptop that is not isolated: they give orders of magnitude, not guarantees. The raw reports are kept with the delivery, not in this repository.
 

@@ -1,16 +1,20 @@
 # Interoperability report (DataLab Desktop and DataLab-Web)
 
-This report states what the two editions exchange, what each checks and replays, and what the tests show, with their limits. It covers the format of profile 0.1 and the editions on the `feature/workspace-provenance` branches (October 2026).
+This report states what the two editions exchange, what each checks and replays, and what the tests show, with their limits. It covers the format of profile 0.1 with the released DataLab-Capsule 0.1.0, Sigima 1.3.0, guidata 3.16.0 and DataLab-Web 0.10.0, and DataLab Desktop from its development branch `develop` (not released yet, to be released as 1.4): see the [final validation](#final-validation-with-the-released-versions-20-october-2026) of 20 October 2026. The earlier runs it reports were made on the development branches, before these releases.
 
 ## Editions and environments tested
 
+Final validation (20 October 2026), every package from PyPI except DataLab Desktop and SigimaX:
+
 | | DataLab Desktop | DataLab-Web |
 | --- | --- | --- |
-| Edition | 1.3.0 (development branch) | 0.9.0 (development branch) |
-| Python | CPython 3.11.6, Windows | CPython 3.12.1 in Pyodide 0.26.4, Chromium, main thread and worker |
-| Sigima, guidata | 1.3.0, 3.16.0 (from the checkouts) | 1.3.0, 3.16.0 (wheels from the checkouts) |
-| NumPy, SciPy, h5py | 2.4.4, 1.16.3, 3.16.0 | 1.26.4, 1.12.0, 3.11.0 |
-| DataLab-Capsule | 0.1.0.dev0 | 0.1.0.dev0 |
+| Edition | `develop` (`618c95db`; version string still 1.3.0), with SigimaX from `develop` (`4792f98`, 1.1.0 not published yet) | 0.10.0: published bundle (GitHub release, same files as <https://datalab-platform.com/web/>) and `v0.10.0` sources served in release mode |
+| Python | CPython 3.12.10, Windows, new virtual environment | CPython 3.12.1 in Pyodide 0.26.4, Chromium, worker |
+| Sigima, guidata | 1.3.0, 3.16.0 (PyPI) | 1.3.0, 3.16.0 (PyPI) |
+| NumPy, SciPy, h5py | 2.4.6, 1.16.3, 3.16.0 | 1.26.4, 1.12.0, 3.11.0 |
+| DataLab-Capsule | 0.1.0 (PyPI) | 0.1.0 (PyPI) |
+
+The command line and the registry of operator A ran from `datalab-capsule[hdf5,registry]` 0.1.0 installed from PyPI in a separate environment holding neither DataLab, Sigima nor guidata. Earlier runs used CPython 3.11.6 and NumPy 2.4.4 for the Desktop, and development builds of the packages.
 
 The library alone (validation, inspection, comparison, verification, registry client) also runs on CPython 3.9, 3.12 and 3.14 and in Pyodide; the registry on CPython.
 
@@ -35,9 +39,12 @@ Identities are kept across editions: object UUIDs, state and activity identifier
 | Two-input differences with X alignment, analysis results, ROI | E1.1, E1.2 reference files written by each edition and reopened by the other | Same verdicts; refusals carried with their code |
 | Workspaces saved by the released DataLab 1.3.0 (no ledger) | E1.3 fixture | Legacy activities in both editions, never replayed, nothing invented |
 | Capsules between two browsers, included and referenced workspace, attachments, registry | DataLab-Web E2E `capsule_exchange.spec.ts` (CI) | Integrity, supplied documents and local replay kept apart; everything fetched from a registry checked |
-| **Two operators, Desktop and Web, without server and with a registry** (scenario of [scenario.md](scenario.md), 11 Oct 2026) | Local evidence `tracking/evidence/e5` | See below |
+| **Two operators, Desktop and Web, without server and with a registry** (scenario of [scenario.md](scenario.md), 11 Oct 2026, then 17 Oct 2026 with candidate distributions) | Evidence kept with the delivery | See below |
+| **Same scenario with the released versions** (20 Oct 2026) | Evidence kept with the delivery | See [final validation](#final-validation-with-the-released-versions-20-october-2026) |
 | **Families of operations** (14 Oct 2026, [decision 0002](decisions/0002-generic-contracts-and-generalized-replay.md)): one operation of each family (n-to-1, signals to image, complex FFT, seeded noise, float32 signal, statistics, image to signal profile, centroid, image convolution reading a global option, a detection that finds nothing), recorded by each edition and replayed by the other | Corpus sources `families_desktop.h5` and `families_web.h5` (written in Pyodide); DataLab `provenance_capture_unit_test.py`, DataLab-Web `provenance_families.spec.ts` (Pyodide) and `test_provenance_capture.py`; `test_cross_edition.py` | Same calls, parameters, roles, input states and contexts in both files. Every activity replayed `exact` in both directions (environment `different`), analysis results and the absence of result included; the recorded global option is applied whatever the reader's setting |
 | **Sigima catalogue across numerical libraries** (14 Oct 2026) | Sigima qualification report and cross-environment replays of the calls captured from the validation tests, in three environments: CPython 3.9, NumPy 1.26.4, SciPy 1.10.1; CPython 3.11, NumPy 2.4.4, SciPy 1.16.3; Pyodide 0.26.4 (WebAssembly: CPython 3.12, NumPy 1.26.4, SciPy 1.12.0), with Sigima `scripts/pyodide_replay` | 213 of 215 operations qualified: 161 must be bitwise identical, 52 have a declared tolerance (FFT family and filters, recursive filters, fits, reductions, transcendental functions, float32 data). Every call replayed in Pyodide is within its rule against both CPython environments; only the phase spectrum, not qualified, is `different` |
+
+Costs and capacity of these paths are measured in the [performance notes](performance.md) (17 October 2026).
 
 Two-operator scenario, without server then with a registry:
 
@@ -47,7 +54,7 @@ Two-operator scenario, without server then with a registry:
 - A extracted the child workspace and replayed it on the Desktop. There were 4 real computations, all `exact`, including the activity added on the Web; the opaque activity is `not_verified`.
 - With the registry: A published with the CLI and token; B retrieved A's revision (manifest checked) and published the child and its review from the Web. A listed the registry and fetched the child (manifest checked, review valid). The fetched manifest is identical to the child capsule's.
 
-Two-operator scenario, again on 17 October 2026, with the candidate distributions (DataLab-Capsule `dbbb2aa`, DataLab `74cca869`, DataLab-Web `67e1188`):
+Two-operator scenario, again on 17 October 2026, with the candidate distributions (DataLab-Capsule `57989f3`, DataLab `30fa1d01`, DataLab-Web `0978a95`):
 
 - A (Desktop, `provenance_demo.py` in an empty folder) built and saved the chain: 4 real computations, all `exact` (the addition of a constant now keeps its identity). The CLI of the candidate wheel, installed in a clean environment, created the capsule with `protocol.txt` (`sha256:aad19d…`) and published it to a local registry, refused without the token, accepted with it.
 - B (Web, worker, through the dialog, `two_operator_scenario.spec.ts`) inspected, opened and replayed the four activities, all `exact (ready)`, retrieved A's revision from the registry, added an activity, exported the child (`sha256:02774a…`, revision of A's), wrote a review citing a report and published the child and the review.
@@ -55,9 +62,24 @@ Two-operator scenario, again on 17 October 2026, with the candidate distribution
 - A replayed the child on the Desktop: 5 real computations, all `exact`, including the activity added on the Web.
 - The production bundle of DataLab-Web, extracted from its tarball and served by a static server with the candidate wheels, inspected, opened and replayed a capsule exported by the candidate DataLab Desktop, and verified a step from the Provenance tab (`release_build.spec.ts`, candidate level). The candidate DataLab Desktop, installed in a clean environment and built with PyInstaller, exported, inspected and reopened a capsule and kept its revision after a restart (`capsule_smoke_check.py`, frozen probe).
 
-The part of the scenario driven by hand in both interfaces (Desktop dialog, then DataLab-Web, then Desktop dialog again) remains to be replayed by an operator (`tracking/E5-MANUAL-REPLAY.md`); the evidence of the run above (files, SHA-256 of the distributions and of every file produced) is kept with the delivery, not in this repository.
+### Final validation with the released versions (20 October 2026)
 
-Costs and capacity of these paths are measured in the [performance notes](performance.md) (17 October 2026).
+The scenario was run again with the published packages only (environments in the first table): DataLab-Capsule 0.1.0, Sigima 1.3.0 and guidata 3.16.0 from PyPI, DataLab-Web 0.10.0, and DataLab Desktop from `develop`, which is not released yet.
+
+- **Operator A, DataLab Desktop.** `provenance_demo.py`, run from a new environment, built and saved the chain: four activities (addition of a constant, then normalizations, with a fan-out). After reopening the file, there were 4 real computations, all `exact`. The published command line created the capsule with `protocol.txt` (`sha256:27065e…`, 4 activities, 5 states, 1 attachment). It then published the capsule to the published registry: refused without the token (401), accepted with it. The manifest and the attachment were sent, never the workspace.
+- **Operator B, DataLab-Web 0.10.0.** The `v0.10.0` sources were served in release mode, which installs only the published pins. A probe recorded sigima 1.3.0, guidata 3.16.0 and datalab-capsule 0.1.0 downloaded from `files.pythonhosted.org`. `two_operator_scenario.spec.ts` (worker, through the dialog) ran the following steps:
+  - The capsule was intact, and the attachment was saved with identical bytes.
+  - The four activities were replayed `exact (ready)`: recorded with NumPy 2.4.6 on CPython, replayed with NumPy 1.26.4 in WebAssembly.
+  - B normalized `S0` (`amplitude`) and exported the child (`sha256:ba0390…`, revision of A's), then wrote a review citing a report.
+  - B retrieved A's revision from the registry (manifest checked), then published the child and its review.
+- **Operator A, checks.** `verify` of the child with B's report and review: workspace verified, 6 stored states, none altered, report and review valid. B's review was refused against A's revision. `diff` reported the revision link and two scientific changes only (added activity and state). It listed apart the presentation, storage (locators, workspace SHA-256 and size), environment (one added) and attachment changes (`protocol.txt` removed, see finding 2).
+- **Operator A, Desktop replay of B's workspace.** There were 5 real computations, all `exact`. The environment was `same` for the activities recorded on the Desktop and `different` for the one recorded in the browser, which did not prevent its replay.
+- **Registry.** `list` showed both revisions with the parent link. `fetch` checked the manifest and the review (valid), and the fetched manifest is identical to the child capsule's. The registry folder held two manifests, one attachment and one review, no workspace. After the registry was stopped, both capsules still verified.
+- **Published Web bundle.** The `datalab-web-0.10.0.tgz` of the GitHub release was served by a static server; its `index.html` and runtime entry points are byte-identical to the deployed site. A's capsule was intact, opened and replayed (`exact`), and a step was verified from the Provenance tab (`release_build.spec.ts`). The sigima, guidata and datalab-capsule wheels came from PyPI only.
+- **Public corpus with the published command line.** The 14 valid capsules pass `validate` and `verify`; the 12 invalid capsules are refused by `verify`.
+- **Published profile.** The schemas and the JSON-LD context served under <https://datalab-platform.com/capsule/0.1/> are byte-identical to those of the datalab-capsule 0.1.0 distribution.
+
+These runs drive the interfaces through scripts and Playwright; [scenario.md](scenario.md) gives the same steps for operators working by hand. The evidence of each run (files, SHA-256 of the distributions and of every file produced) is kept with the delivery, not in this repository.
 
 ## Findings
 
