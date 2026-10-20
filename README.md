@@ -26,7 +26,7 @@ Users of DataLab Desktop and DataLab-Web need nothing more than their edition: b
 
 The package itself is installed in one of three ways, which must not be mixed up:
 
-- **Released version**, for users of the command line and third-party readers: `pip install datalab-capsule`, with the `hdf5` extra to create capsules or check stored states and the `registry` extra to run a registry.
+- **Released version**, for users of the command line and third-party readers: `pip install datalab-capsule`, with the `hdf5` extra to create capsules or check stored states and the `registry` extra to run a registry; or `conda install -c conda-forge datalab-capsule`, adding `numpy` and `h5py`, or `fastapi` and `uvicorn`, for the same features.
 - **Candidate qualification**, before a release: a wheel and an sdist built from the commit to qualify (`python -m build`), checked with `scripts/check_dist.py` and `scripts/check_profile.py`, then installed in a clean environment, outside the checkout.
 - **Development**: editable install of this checkout, used by the sibling checkouts of DataLab and DataLab-Web (see [developer notes](doc/development.md)).
 

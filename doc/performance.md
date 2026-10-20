@@ -168,7 +168,7 @@ The Web archive and workspace each remain limited to 256 MiB, and its manifest t
 
 These ranges are those of one computer. They are neither guarantees nor limits enforced by the editions: the configured limits stay as they are, and no edition aligns its limits on the other one.
 
-## Delivery checklist (17 October 2026)
+## Delivery checklist (17 October 2026, updated on 20 October 2026)
 
 Documentation and distribution:
 
@@ -176,9 +176,10 @@ Documentation and distribution:
 - [x] User instructions need no development checkout: the scenario goes through both interfaces, the command line is optional, the evidence scripts are presented as developer tools.
 - [x] Versions, embedded resources, profile and corpus agree: the schemas and context of the candidate wheel have the SHA-256 published by the profile (`check_profile.py`, also checked by `check_dist.py --profile`).
 - [x] Candidate distributions installed and used in clean environments: DataLab-Capsule (core and extras), DataLab Desktop (wheels, then PyInstaller build), DataLab-Web (production bundle from its tarball).
-- [ ] To do: the same checks with the published packages only (after DataLab-Capsule 0.1.0, Sigima 1.3.0, guidata 3.16.0 and the DataLab-Web pins); the MSI installer; DataLab 1.4.0 (outside the October sequence).
+- [x] The same checks with the published packages only, on 20 October 2026: DataLab-Capsule 0.1.0, Sigima 1.3.0, guidata 3.16.0 and DataLab-Web 0.10.0 (see the [final validation](interoperability.md#final-validation-with-the-released-versions-20-october-2026)).
+- [ ] To do with DataLab 1.4.0 (outside the October sequence): the MSI installer.
 - [x] Scenario replayed with the candidate artefacts, the command-line checks and the registry variant; the Desktop part through its dialog and the Web part by hand remain to be replayed by an operator ([ ] to do).
-- [ ] Not delivered: conda-forge (recipe of DataLab-Capsule prepared and built locally, update of the DataLab recipe prepared; both to be submitted after the PyPI publications).
+- [x] conda-forge: DataLab-Capsule 0.1.0 published on 20 October 2026 as a `noarch` package ([feedstock](https://github.com/conda-forge/datalab-capsule-feedstock)); the update of the DataLab recipe follows DataLab 1.4.0.
 
 Costs and capacity:
 
