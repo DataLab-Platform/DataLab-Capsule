@@ -48,6 +48,28 @@ server {
 
 DataLab-Web users then enter `https://registry.example` as the registry address; the command line takes the same address (`workspace-capsule registry list https://registry.example`). Under a path prefix the API works, but the `/docs` page does not find `/openapi.json`.
 
+### Restricting access
+
+The registry has no user accounts: publishing needs the token, and anyone who can reach the service can read it. Restrict reading by restricting who reaches the service, with the organisation's own network controls: deploy it on an isolated network (below), or let the reverse proxy accept only the organisation's addresses or VPN, for example in the `location` block above:
+
+```nginx
+allow 10.0.0.0/8;   # the organisation's networks
+deny all;
+```
+
+The clients of this version (DataLab-Web, DataLab Desktop and the command line) send no credentials when reading, and only the token when publishing. An authentication that the proxy requires on every request (HTTP Basic, single sign-on cookies, client certificates) therefore blocks them. User authentication and identity management are outside the scope of this version.
+
+### On an isolated network
+
+Neither the registry nor the command line needs Internet access. On a connected machine with the same platform and Python version as the target host, download the wheels, copy the folder to the isolated network, then install without a package index and run the registry as above, with a certificate of the organisation for HTTPS:
+
+```bash
+pip download "datalab-capsule[registry]" --dest wheels             # connected machine
+pip install --no-index --find-links wheels "datalab-capsule[registry]"   # isolated host
+```
+
+DataLab Desktop also publishes to and reads from such a registry. DataLab-Web downloads its runtime from the Internet when it starts (no offline mode) and cannot be used on a network without Internet access in this version.
+
 ### Checks after deployment
 
 ```bash
