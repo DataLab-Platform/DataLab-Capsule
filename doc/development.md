@@ -35,7 +35,7 @@ The other repositories use the checkout directly:
 ## Pins and CI
 
 - DataLab-Web pins DataLab-Capsule, Sigima and guidata in `datalab-capsule-dependency.json`, `sigima-dependency.json` and `guidata-dependency.json`. `developmentRef` is a full commit hash used by development builds and CI (`scripts/*_dependency.py prepare-pyodide` builds the wheel from that commit); `publishedRequirement` is used by release builds only (`npm run build:release`, checked by `npm run release:guard`). A change to the library reaches the Web CI only after it is pushed and the pin is moved.
-- DataLab-Capsule CI runs on push: CPython 3.9, 3.12 and 3.14 (with the `registry` extra), Pyodide 0.26.4 (Node), and the CLI in a clean environment without NumPy or h5py.
+- DataLab-Capsule CI runs on push: CPython 3.10, 3.12 and 3.14 (with the `registry` extra), Pyodide 0.26.4 (Node), and the CLI in a clean environment without NumPy or h5py.
 - DataLab-Web CI runs on demand on feature branches: `gh workflow run tests.yml -R DataLab-Platform/web --ref <branch>`. Its end-to-end job installs the registry from the pinned wheel and requires it (`DLW_REQUIRE_REGISTRY=1`), and requires provenance (`DLW_REQUIRE_PROVENANCE=1`): those tests fail rather than skip.
 - DataLab CI: `gh workflow run test_pyqt5.yml` and `test_pyqt6.yml` with `-f job_to_run=build`.
 

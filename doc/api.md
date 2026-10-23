@@ -1,6 +1,6 @@
 # API
 
-DataLab-Capsule is a pure Python library (CPython 3.9+ and Pyodide). The core needs the standard library and `jsonschema`; functions marked **h5py** also need NumPy and h5py. Every error derives from `datalab_capsule.integrity.ProvenanceError`. Nothing in the library accesses the network or executes code named in a file.
+DataLab-Capsule is a pure Python library (CPython 3.10+ and Pyodide). The core needs the standard library and `jsonschema`; functions marked **h5py** also need NumPy and h5py. Every error derives from `datalab_capsule.integrity.ProvenanceError`. Nothing in the library accesses the network or executes code named in a file.
 
 ## Read, verify and compare capsules
 
