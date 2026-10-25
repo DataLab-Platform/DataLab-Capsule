@@ -24,6 +24,7 @@ the failure is logged and counted.
 from __future__ import annotations
 
 import contextlib
+import copy
 import dataclasses
 import logging
 import uuid
@@ -134,7 +135,9 @@ class Computation:
 
     Attributes:
         describe_call: ``(func, inputs, param, *, roles=None, contract=...) ->
-         description`` (see ``sigima.proc.contracts.describe_call``).
+         description`` (see ``sigima.proc.contracts.describe_call``); entries of
+         its optional ``context`` mapping (plain JSON data) are recorded in the
+         execution context of the activity.
         get_contract: ``(operation_id, contract_version) -> contract``; raises
          when the operation or the version is unknown.
         prepare_execution: ``(contract, inputs, *, values, context) -> prepared``
@@ -511,7 +514,9 @@ class Recorder:
         The identity of the operation is kept as soon as the computation library
         knows it, whether or not its contract is qualified for replay: the
         qualification is checked when replaying, against the local library. The
-        context holds the global options read by the computation, if any, and
+        context holds the entries declared by the library in the ``context`` of
+        its description (rules the computation depends on, checked by the library
+        when replaying), the global options read by the computation, if any, and
         the digests of the metadata of inputs it reads (see
         :meth:`_metadata_read`), taken from *executed* when given.
         """
@@ -523,8 +528,10 @@ class Recorder:
             description["parameters"],
             list(zip(description["roles"], state_ids)),
         )
+        context: dict[str, Any] = copy.deepcopy(description.get("context") or {})
         options = description.get("options")
-        context: dict[str, Any] = {"options": dict(options)} if options else {}
+        if options:
+            context["options"] = dict(options)
         reads = description.get("metadata_read") or []
         if reads:
             sources = objs if executed is None else list(executed)
