@@ -10,9 +10,11 @@ module runs in CPython and in Pyodide (``tests/pyodide/run_pyodide.mjs``).
 from __future__ import annotations
 
 import collections
+import io
 import json
 import socket
 import sys
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -93,6 +95,15 @@ def test_every_fixture_is_exercised() -> None:
     assert files and [f for f in files if not used[f]] == []
 
 
+def _deflated_entries(data: bytes) -> list[tuple[str, int, bytes]] | None:
+    """Return the entries of a ZIP holding deflated entries, else None."""
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        infos = archive.infolist()
+        if not any(i.compress_type == zipfile.ZIP_DEFLATED for i in infos):
+            return None
+        return [(i.filename, i.compress_type, archive.read(i)) for i in infos]
+
+
 def test_corpus_is_up_to_date() -> None:
     """The committed corpus matches a fresh build from its sources."""
     built = build()
@@ -103,7 +114,13 @@ def test_corpus_is_up_to_date() -> None:
     }
     assert set(built) == on_disk
     for path, data in built.items():
-        assert (CORPUS / path).read_bytes() == data, path
+        committed = (CORPUS / path).read_bytes()
+        if committed == data:
+            continue
+        # Deflate output depends on the zlib build (e.g. zlib-ng in CPython 3.14
+        # on Windows): compare such archives by their entries.
+        entries = _deflated_entries(data)
+        assert entries is not None and entries == _deflated_entries(committed), path
 
 
 def test_no_application_is_imported() -> None:
