@@ -2,7 +2,7 @@
 
 Exchange and verify scientific workspace provenance as open RO-Crate capsules (library and CLI, no DataLab required).
 
-Status: experimental. Version 0.1.0 is the first public release, on PyPI as `datalab-capsule`; it implements the experimental [DataLab capsule profile 0.1](https://datalab-platform.com/capsule/0.1), which may still change.
+Status: experimental. Released on PyPI as `datalab-capsule` since version 0.1.0; it implements the experimental [DataLab capsule profile 0.1](https://datalab-platform.com/capsule/0.1), which may still change.
 
 ## Scope
 
