@@ -107,11 +107,20 @@ def detect(src, threshold):
     return FakeTable(found) if threshold >= 0 else None
 
 
+def ruled(src, factor):
+    """Fake operation depending on a rule declared by the computation library."""
+    return signal(src.y * factor, x=src.x)
+
+
+RULE = {"rule": "test.rule", "version": 1}
+
+
 CONTRACTS = {
     ("test.scale", 1): FakeContract(scale),
     ("test.shift", 1): FakeContract(shift, qualified=False),
     ("test.detect", 1): FakeContract(detect),
     ("test.gain", 1): FakeContract(gain),
+    ("test.ruled", 1): FakeContract(ruled),
 }
 
 
@@ -122,8 +131,11 @@ def describe_call(func, inputs, param, *, roles=None, contract=...):
         shift: "test.shift",
         detect: "test.detect",
         gain: "test.gain",
+        ruled: "test.ruled",
     }
     identified = contract is ... and func in known
+    # Only some library versions declare a context
+    declared = {"context": {"convention": dict(RULE)}} if func is ruled else {}
     return {
         "operation": {"id": known[func], "contract_version": 1} if identified else None,
         "qualification": {
@@ -144,6 +156,7 @@ def describe_call(func, inputs, param, *, roles=None, contract=...):
         ),
         "limits": ["parameters_not_encoded"] if param == "unencodable" else [],
         "implementation": {"package": "test", "version": "1", "python_name": "x"},
+        **declared,
     }
 
 
@@ -641,3 +654,20 @@ def test_metadata_read_by_the_computation(workspace) -> None:
     used.metadata = {"gain": 7.0}
     pending = recorder.begin(gain, 3.0, src, executed=[used])
     assert pending.context["metadata"][0]["digest"] != read["digest"]
+
+
+def test_context_declared_by_the_library(workspace) -> None:
+    """Rules declared by the library are recorded and passed back for a replay."""
+    recorder = Recorder(workspace.host(), computation())
+    src = workspace.add(signal([1.0, 2.0, 3.0, 4.0]), 0)
+    pending = recorder.begin(ruled, 2.0, src)
+    activity = recorder.complete(pending, workspace.add(ruled(src, 2.0), 1))
+    assert activity["context"]["convention"] == RULE
+    assert activity["context"]["x_alignment"] is None
+    activity_id = activity["activity_id"]
+    _plan, prepared = recorder.prepare_replay(activity_id)
+    assert prepared.context["convention"] == RULE
+    assert recorder.verify(activity_id, lambda p: p.run())["verdict"] == "exact"
+    # Descriptions without context (earlier library versions) record none
+    _pending, activity = _run(recorder, workspace, scale, 2.0, index=2)
+    assert "convention" not in activity["context"]

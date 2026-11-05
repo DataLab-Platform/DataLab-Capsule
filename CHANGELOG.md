@@ -2,6 +2,21 @@
 
 All notable changes to DataLab-Capsule are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The capsule format itself is versioned by its profile (<https://datalab-platform.com/capsule/0.1>).
 
+## [0.2.0] - 2026-11-05
+
+### Requirements
+
+- **Third-party**:
+  - Python 3.10 or later is now required (`requires-python = ">=3.10, <4"`). Python 3.9 users must keep an earlier compatible release; the Pyodide runtime is unchanged.
+
+### Added
+
+- **Execution context declared by the computation library:** the recorder now keeps, in the execution context of an activity, the rules that the computation library declares in the description of a call (`context` mapping of `describe_call`), and a replay passes them back to the library, which refuses an activity recorded without a rule it requires or with an unknown one (`unsupported_context`). Sigima uses it to record the convention selecting image pixels in regions of interest, so that activities recorded with an earlier convention are refused explicitly instead of being reported as different. Descriptions without such a mapping (earlier library versions) record nothing more.
+
+### Fixed
+
+- The test checking the committed corpus no longer fails with zlib builds producing different compressed bytes (e.g. zlib-ng, used by CPython 3.14 on Windows): archives with compressed entries are compared by their content.
+
 ## [0.1.0] - 2026-10-19
 
 First public release, shared by DataLab Desktop and DataLab-Web.

@@ -2,7 +2,7 @@
 
 Exchange and verify scientific workspace provenance as open RO-Crate capsules (library and CLI, no DataLab required).
 
-Status: experimental. Version 0.1.0 is the first public release, on PyPI as `datalab-capsule`; it implements the experimental [DataLab capsule profile 0.1](https://datalab-platform.com/capsule/0.1), which may still change.
+Status: experimental. Released on PyPI as `datalab-capsule` since version 0.1.0; it implements the experimental [DataLab capsule profile 0.1](https://datalab-platform.com/capsule/0.1), which may still change.
 
 ## Scope
 
@@ -17,7 +17,7 @@ Status: experimental. Version 0.1.0 is the first public release, on PyPI as `dat
 - Light attachments: up to 8 files of at most 16 MiB each, chosen by the author (protocol, notes, small tables...), stored under `attachments/` and declared in the manifest (`dlc:attachment`) with their media type, size and SHA-256. They are part of the manifest fingerprint. The reader refuses undeclared, missing or altered attachments. They are returned as bytes, written to disk only on explicit request, and never opened or executed.
 - Semantic diff (`diff_manifests`): changes between two capsules are sorted into scientific (activities, parameters, states, fingerprints, ROI), presentation (name, description, licence, date), storage (workspace file SHA-256 and size, included or referenced, locators: different bytes do not show a scientific change), environment (environments, packages, the environment of each activity) and attachments (added, removed or changed; their content is not interpreted, since a protocol or a calibration certificate may matter scientifically). `scientific_conclusion` says what can be concluded: `differences`, `none` (no scientific change, the same workspace file and the same attachment contents) or `none_detected` (nothing differs in the recorded activities and states, but the workspace files or the attachment contents differ, so equality is not established).
 - Verification without computation (`verify_capsule`): the archive and manifest, the workspace integrity, the match between the manifest and the workspace ledger, the fingerprints and ROI of every stored state (with h5py), and supplied verification reports and reviews. Recomputing an activity is the replay of an edition, never this package's job.
-- Pure Python for CPython 3.9+ and Pyodide (Python 3.12). The core only needs the standard library and `jsonschema`; HDF5 helpers use NumPy and h5py.
+- Pure Python for CPython 3.10+ and Pyodide (Python 3.12). The core only needs the standard library and `jsonschema`; HDF5 helpers use NumPy and h5py.
 - The package never imports DataLab, Sigima, SigimaX or Qt, and never executes code named in a file.
 
 ## Installation
@@ -26,7 +26,7 @@ Users of DataLab Desktop and DataLab-Web need nothing more than their edition: b
 
 The package itself is installed in one of three ways, which must not be mixed up:
 
-- **Released version**, for users of the command line and third-party readers: `pip install datalab-capsule`, with the `hdf5` extra to create capsules or check stored states and the `registry` extra to run a registry.
+- **Released version**, for users of the command line and third-party readers: `pip install datalab-capsule`, with the `hdf5` extra to create capsules or check stored states and the `registry` extra to run a registry; or `conda install -c conda-forge datalab-capsule`, adding `numpy` and `h5py`, or `fastapi` and `uvicorn`, for the same features.
 - **Candidate qualification**, before a release: a wheel and an sdist built from the commit to qualify (`python -m build`), checked with `scripts/check_dist.py` and `scripts/check_profile.py`, then installed in a clean environment, outside the checkout.
 - **Development**: editable install of this checkout, used by the sibling checkouts of DataLab and DataLab-Web (see [developer notes](doc/development.md)).
 
