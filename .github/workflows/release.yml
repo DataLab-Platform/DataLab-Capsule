@@ -1,25 +1,42 @@
-# Build, check and publish a DataLab-Capsule release.
+# Build, check and publish a DataLab-Capsule release (procedure: RELEASING.md).
 #
-# Triggers:
-#   * push of a tag vX.Y.Z (digits only: no pre-release, development or local
-#     suffix): tests, build, artifact checks, PyPI publication (Trusted
-#     Publishing) and a draft GitHub release;
-#   * manual run (workflow_dispatch, even on a tag) or branch push changing the
-#     packaging: dry run, the same tests, build and checks, never publishes.
+# Maintainers never create a GitHub release by hand. A release takes two
+# steps, each one running this workflow, which relies on the release actions
+# shared by the DataLab Platform projects
+# (https://github.com/DataLab-Platform/release-actions):
 #
-# Prerequisites (one-time, off-CI): PyPI Trusted Publishing for the project
-# "datalab-capsule" -> this repository, workflow "release.yml", environment
-# "pypi" (with required reviewers, so that each publication is approved).
+# 1. "Prepare vX.Y.Z" - a maintainer pushes a release tag:
+#      vX.Y.Z      final release, on `main`, __version__ = "X.Y.Z"
+#      vX.Y.Z-rcN  release candidate, on any branch, __version__ = "X.Y.ZrcN"
+#    The tag is checked (format, version, CHANGELOG.md section, release
+#    branch, no release already published), then the tests, the build and the
+#    artifact checks run, and a DRAFT GitHub release is created with the
+#    wheel, the sdist, SHA256SUMS and build provenance attestations. Nothing
+#    is published yet: on failure, delete the tag, fix and tag again.
+#
+# 2. "Publish vX.Y.Z" - a maintainer reviews the draft release and publishes
+#    it. The files of the release are checked against SHA256SUMS and their
+#    attestations, then uploaded with Trusted Publishing to PyPI (final
+#    release) or TestPyPI (release candidate). A release created by hand has
+#    no such files: nothing is uploaded.
+#
+# A manual run (workflow_dispatch, even on a tag) or a branch push changing
+# the packaging is a dry run: the same tests, build and checks, never
+# publishes.
+#
+# Prerequisites (one-time, off-CI): Trusted Publishing for the project
+# "datalab-capsule" with this workflow (`release.yml`), on PyPI with
+# environment "pypi" and on TestPyPI with environment "testpypi".
 name: Release
+
+run-name: >-
+  ${{ github.event_name == 'release' && 'Publish' || (github.event_name == 'push' && github.ref_type == 'tag' && 'Prepare' || 'Dry run') }}
+  ${{ github.ref_name }}
 
 on:
   push:
     tags:
       - "v[0-9]*.[0-9]*.[0-9]*"
-      # A letter or a dash after the "v" (v1.0.0rc1, v1.0.0-beta...); the build
-      # job also refuses any other tag than vX.Y.Z
-      - "!v*[a-zA-Z]*"
-      - "!v*-*"
     # Path filters only apply to branch pushes, never to tags.
     branches:
       - "**"
@@ -28,6 +45,8 @@ on:
       - "scripts/check_dist.py"
       - "MANIFEST.in"
       - "pyproject.toml"
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -37,30 +56,50 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  NOTES_FILE: CHANGELOG.md
+  NOTES_HEADING: "## [{version}]"
+
 jobs:
+  # ---------------------------------------------------------------------------
+  # Step 1 - Prepare (tag push) or dry run (branch push, manual run).
+  # ---------------------------------------------------------------------------
+  check-tag:
+    name: Check the tag
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: tag
+        uses: DataLab-Platform/release-actions/check-tag@v1
+        with:
+          version-file: src/datalab_capsule/__init__.py
+          notes-file: ${{ env.NOTES_FILE }}
+          notes-heading: ${{ env.NOTES_HEADING }}
+
   tests:
+    needs: check-tag
+    # The tag is only checked on tag pushes (skipped for dry runs).
+    if: ${{ !cancelled() && github.event_name != 'release' && needs.check-tag.result != 'failure' }}
     uses: ./.github/workflows/tests.yml
 
   build:
     name: Build and check the distributions
-    needs: tests
+    needs: [check-tag, tests]
+    if: ${{ !cancelled() && needs.tests.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - name: Check the release tag
-        if: github.ref_type == 'tag'
-        run: |
-          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
-            echo "Not a final release tag: $GITHUB_REF_NAME" >&2
-            exit 1
-          }
-      # On a tag, the resources of the wheel are checked against the
+      # For a release, the resources of the wheel are checked against the
       # published profile; development pushes may precede its publication.
       - name: Check out the published profile
-        if: github.ref_type == 'tag'
+        if: needs.check-tag.result == 'success'
         uses: actions/checkout@v7
         with:
           repository: DataLab-Platform/capsule
@@ -70,16 +109,15 @@ jobs:
           python -m pip install --upgrade pip build twine
           python -m build
       - name: Check the distributions
+        env:
+          RELEASE_VERSION: ${{ needs.check-tag.outputs.version }}
         run: |
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            python scripts/check_dist.py dist --version "${GITHUB_REF_NAME#v}" --profile profile/0.1
+          if [ -n "$RELEASE_VERSION" ]; then
+            python scripts/check_dist.py dist --version "$RELEASE_VERSION" --profile profile/0.1
           else
             python scripts/check_dist.py dist
           fi
           twine check --strict dist/*
-      - name: Check the release notes
-        if: github.ref_type == 'tag'
-        run: grep -q "^## \[${GITHUB_REF_NAME#v}\]" CHANGELOG.md
       - name: Install and use in clean environments
         run: |
           wheel="$(ls dist/*.whl)"
@@ -102,62 +140,56 @@ jobs:
           path: dist/
           retention-days: 30
 
-  publish-pypi:
-    name: Publish to PyPI
-    if: github.event_name == 'push' && github.ref_type == 'tag'
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/p/datalab-capsule
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@v7
-        with:
-          name: python-dists
-          path: dist
-      - uses: pypa/gh-action-pypi-publish@release/v1
-
-  github-release:
-    name: Draft GitHub release
-    if: github.event_name == 'push' && github.ref_type == 'tag'
-    needs: publish-pypi
+  draft-release:
+    name: Create the draft release
+    # Skipped for dry runs, where check-tag is skipped.
+    needs: [check-tag, build]
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      id-token: write
-      attestations: write
+      contents: write       # create the draft release
+      id-token: write       # required by the build provenance attestation
+      attestations: write   # required by the build provenance attestation
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v7
         with:
           name: python-dists
           path: dist
-      - name: Checksums and release notes
-        run: |
-          (cd dist && sha256sum *.whl *.tar.gz) > SHA256SUMS
-          cat SHA256SUMS
-          version="${GITHUB_REF_NAME#v}"
-          awk -v head="## [$version]" '
-            index($0, head) == 1 { on = 1; next }
-            on && /^## \[/ { exit }
-            on { print }
-          ' CHANGELOG.md > release-notes.md
-          test -s release-notes.md
-      - uses: actions/attest-build-provenance@v4
+      - uses: DataLab-Platform/release-actions/create-draft@v1
         with:
-          subject-path: |
-            dist/*.whl
-            dist/*.tar.gz
-      - uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: DataLab-Capsule ${{ github.ref_name }}
-          body_path: release-notes.md
-          draft: true
-          fail_on_unmatched_files: true
+          name: DataLab-Capsule
           files: |
             dist/*.whl
             dist/*.tar.gz
-            SHA256SUMS
+          notes-file: ${{ env.NOTES_FILE }}
+          notes-heading: ${{ env.NOTES_HEADING }}
+
+  # ---------------------------------------------------------------------------
+  # Step 2 - Publish: upload the checked files of the published release.
+  # ---------------------------------------------------------------------------
+  publish:
+    name: Publish to ${{ contains(github.ref_name, '-rc') && 'TestPyPI' || 'PyPI' }}
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ contains(github.ref_name, '-rc') && 'testpypi' || 'pypi' }}
+      url: ${{ contains(github.ref_name, '-rc') && 'https://test.pypi.org/p/datalab-capsule' || 'https://pypi.org/p/datalab-capsule' }}
+    permissions:
+      contents: read      # download the files of the release
+      attestations: read  # verify their build provenance
+      id-token: write     # Trusted Publishing
+    steps:
+      - id: release
+        uses: DataLab-Platform/release-actions/verify-release@v1
+        with:
+          files: |
+            datalab_capsule-{version}-py3-none-any.whl
+            datalab_capsule-{version}.tar.gz
+
+      - name: Upload to ${{ steps.release.outputs.prerelease == 'true' && 'TestPyPI' || 'PyPI' }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: ${{ steps.release.outputs.prerelease == 'true' && 'https://test.pypi.org/legacy/' || 'https://upload.pypi.org/legacy/' }}
+          # Makes re-running this job safe after a partial upload: the files
+          # were checked above.
+          skip-existing: true
